@@ -1,5 +1,5 @@
 // board.ts
-// Game board and piece logic for the TypeScript/HTML5 webapp
+// Game board and piece logic for the TypeScript/HTML5 double
 
 // Cell types (matching Java constants)
 export const CELL_EMPTY = 0;
@@ -23,7 +23,7 @@ export class Board {
   height: number;
   grid: Cell[][];
 
-  constructor(width = 10, height = 20) {
+  constructor(width = 20, height = 10) {
     // Use provided dimensions (default 10x20)
     this.width = width;
     this.height = height;
@@ -46,10 +46,8 @@ export class Board {
   // starting from (x, y), or null if no loop is found.
   detectLoop(x: number, y: number): { x: number; y: number }[] | null {
     const startCell = this.grid[y][x];
-    const DEBUG_LOOP = true;
-    if (DEBUG_LOOP) console.log(`[detectLoop] start at (${x},${y}) cell=${startCell}`);
+    // No debug logging in production
     if (startCell === CELL_EMPTY) {
-      if (DEBUG_LOOP) console.log('[detectLoop] start cell empty -> no loop');
       return null;
     }
 
@@ -112,7 +110,7 @@ export class Board {
       if (neighborCell === CELL_EMPTY) continue;
       const neighborPorts = portsFor(neighborCell);
       if (!neighborPorts[opposite(d)]) continue; // neighbor doesn't connect back
-      if (DEBUG_LOOP) console.log(`[detectLoop] neighbor at (${nx},${ny}) cell=${neighborCell} connects back`);
+  // neighbor connects back
 
       // BFS from neighbor to see if we can reach start without immediately using the back-edge
       const q: { x: number; y: number }[] = [];
@@ -130,7 +128,7 @@ export class Board {
         const cur = q.shift()!;
         const cx = cur.x;
         const cy = cur.y;
-        if (DEBUG_LOOP) console.log(`[detectLoop][BFS] visiting (${cx},${cy})`);
+  // visiting node in BFS
         const cell = this.grid[cy][cx];
         const ports = portsFor(cell);
         for (let dd = 0; dd < 4; dd++) {
@@ -145,7 +143,7 @@ export class Board {
           if (!mports[opposite(dd)]) continue;
           // Disallow the immediate back-edge from neighbor to start at first step
           if (cx === nx && cy === ny && mx === x && my === y) continue;
-          if (DEBUG_LOOP) console.log(`  [BFS] neighbor candidate (${mx},${my}) cell=${mcell}`);
+          // neighbor candidate
           if (!visited[my][mx]) {
             visited[my][mx] = true;
             parent[my][mx] = { x: cx, y: cy };
@@ -161,7 +159,7 @@ export class Board {
       }
 
       if (found && predecessor) {
-        if (DEBUG_LOOP) console.log(`[detectLoop] found path back to start via predecessor (${predecessor.x},${predecessor.y})`);
+        // found path back to start via predecessor
         // Reconstruct chain from predecessor back to neighbor (nx,ny)
         const chain: { x: number; y: number }[] = [];
         let cur2: { x: number; y: number } | null = { x: predecessor.x, y: predecessor.y };
@@ -171,7 +169,7 @@ export class Board {
           cur2 = parent[cur2.y][cur2.x];
           if (!cur2) break;
         }
-        if (DEBUG_LOOP) console.log(`[detectLoop] cycle path: ${JSON.stringify([{ x, y }].concat(chain))}`);
+  // cycle path reconstructed
         // return start + chain (chain goes from predecessor -> ... -> neighbor)
         return [{ x, y }].concat(chain);
       }

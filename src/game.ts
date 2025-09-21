@@ -22,12 +22,13 @@ export class Game {
     index: number;
     lastTime: number; // ms
     interval: number; // ms per tile
+    pointsPerTile?: number;
   };
 
   constructor() {
     this.board = new Board();
     this.currentPiece = null;
-    this.loopRemoval = { active: false, cells: [], index: 0, lastTime: 0, interval: 150 };
+  this.loopRemoval = { active: false, cells: [], index: 0, lastTime: 0, interval: 150, pointsPerTile: 1 };
     this.state = {
       score: 0,
       highScores: [],
@@ -61,8 +62,8 @@ export class Game {
   }
 
   spawnPiece() {
-  // For debugging: only select from first 2 pieces
-  const idx = Math.floor(Math.random() * 2);
+  // Select a random piece from all available shapes
+  const idx = Math.floor(Math.random() * PIECE_SHAPES.length);
     const shape = PIECE_SHAPES[idx];
   // Determine piece dimensions (shape is [rotation][x][y])
   const pieceWidth = shape[0].length; // number of columns (x)
@@ -110,8 +111,69 @@ export class Game {
 
   rotatePiece() {
     if (!this.currentPiece) return;
+    // remember old state so we can revert if needed
+    const oldRotation = this.currentPiece.rotation;
+    const oldX = this.currentPiece.x;
+    const oldY = this.currentPiece.y;
+
+    // perform rotation
     this.currentPiece.rotate();
-    // Debug logging removed: rotate
+
+    // After rotation, compute occupied bounding box (ignore CELL_EMPTY)
+    const s = this.currentPiece.shape;
+    let minCol = Number.POSITIVE_INFINITY;
+    let maxCol = Number.NEGATIVE_INFINITY;
+    let minRow = Number.POSITIVE_INFINITY;
+    let maxRow = Number.NEGATIVE_INFINITY;
+    for (let cx = 0; cx < s.length; cx++) {
+      for (let cy = 0; cy < s[cx].length; cy++) {
+        if (s[cx][cy] !== CELL_EMPTY) {
+          if (cx < minCol) minCol = cx;
+          if (cx > maxCol) maxCol = cx;
+          if (cy < minRow) minRow = cy;
+          if (cy > maxRow) maxRow = cy;
+        }
+      }
+    }
+    // If no occupied cells (shouldn't happen), revert
+    if (minCol === Number.POSITIVE_INFINITY) {
+      this.currentPiece.rotation = oldRotation;
+      return;
+    }
+
+    // Allowed range for piece.x so occupied cols are inside [0, board.width-1]
+    const minXAllowed = -minCol;
+    const maxXAllowed = this.board.width - 1 - maxCol;
+    const minYAllowed = -minRow;
+    const maxYAllowed = this.board.height - 1 - maxRow;
+
+    // Clamp current position into allowed bounds
+    let baseX = Math.min(Math.max(this.currentPiece.x, minXAllowed), maxXAllowed);
+    let baseY = Math.min(Math.max(this.currentPiece.y, minYAllowed), maxYAllowed);
+
+    // Try small kicks around clamped position (only enforce boundaries, no board collision checks)
+    const kicks = [0, -1, 1, -2, 2];
+    let placed = false;
+    for (let dx of kicks) {
+      for (let dy of kicks) {
+        const nx = baseX + dx;
+        const ny = baseY + dy;
+        if (nx < minXAllowed || ny < minYAllowed || nx > maxXAllowed || ny > maxYAllowed) continue;
+        // Accept this position as it keeps occupied tiles inside the board
+        this.currentPiece.x = nx;
+        this.currentPiece.y = ny;
+        placed = true;
+        break;
+      }
+      if (placed) break;
+    }
+
+    if (!placed) {
+      // revert rotation and position
+      this.currentPiece.rotation = oldRotation;
+      this.currentPiece.x = oldX;
+      this.currentPiece.y = oldY;
+    }
   }
 
   // Only used for placement now
@@ -143,21 +205,81 @@ export class Game {
 
   placePiece() {
     if (!this.currentPiece) return;
-    // Only place if no collision
+    // Note: don't early-return on collision here — exact-match removals
+    // should be detected first. We'll check collisions before the normal placement.
+  let loopDetected = false;
+  const loopCells: { x: number; y: number }[] = [];
+    // First, check for exact-match removal possibility: piece's non-empty tiles must
+    // match the board's tiles exactly at the same positions (same cell types).
+    const s = this.currentPiece.shape;
+    const w = s.length;
+    const h = s[0].length;
+    let nonEmptyCount = 0;
+    let exactMatch = true;
+    for (let x = 0; x < w; x++) {
+      for (let y = 0; y < h; y++) {
+        const cellType = s[x][y];
+        if (cellType) {
+          nonEmptyCount++;
+          const boardX = this.currentPiece.x + x;
+          const boardY = this.currentPiece.y + y;
+          if (
+            boardY < 0 ||
+            boardY >= this.board.height ||
+            boardX < 0 ||
+            boardX >= this.board.width
+          ) {
+            exactMatch = false;
+            break;
+          }
+          if (this.board.grid[boardY][boardX] !== cellType) {
+            exactMatch = false;
+            break;
+          }
+        }
+      }
+      if (!exactMatch) break;
+    }
+
+    if (exactMatch && nonEmptyCount > 0) {
+      // We can remove these tiles instead of placing, but only if player has enough score
+      const cost = 2 * nonEmptyCount;
+      if (this.state.score >= cost) {
+        // Schedule removal animation for these tiles with negative points per tile
+        const cellsToRemove: { x: number; y: number }[] = [];
+        for (let x = 0; x < w; x++) {
+          for (let y = 0; y < h; y++) {
+            if (s[x][y]) {
+              cellsToRemove.push({ x: this.currentPiece.x + x, y: this.currentPiece.y + y });
+            }
+          }
+        }
+        this.loopRemoval.cells = cellsToRemove;
+        this.loopRemoval.index = 0;
+        this.loopRemoval.active = true;
+        this.loopRemoval.lastTime = performance.now();
+        this.loopRemoval.pointsPerTile = -2; // cost per tile
+        // Hide hovering piece
+        this.currentPiece = null;
+        this.state.currentPiece = null;
+        return;
+      } else {
+        // Not enough score, fall through to normal placement
+      }
+    }
+    // For normal placement (not exact-match removal), ensure there's no collision
     if (this.checkPlacementCollision(this.currentPiece)) {
       // Invalid placement, do not place
       return;
     }
-  let loopDetected = false;
-  const loopCells: { x: number; y: number }[] = [];
     // place using shape [x][y]
     {
-      const s = this.currentPiece.shape;
-      const w = s.length;
-      const h = s[0].length;
-      for (let x = 0; x < w; x++) {
-        for (let y = 0; y < h; y++) {
-          const cellType = s[x][y];
+      const s2 = this.currentPiece.shape;
+      const w2 = s2.length;
+      const h2 = s2[0].length;
+      for (let x = 0; x < w2; x++) {
+        for (let y = 0; y < h2; y++) {
+          const cellType = s2[x][y];
           if (cellType) {
             const boardX = this.currentPiece.x + x;
             const boardY = this.currentPiece.y + y;
@@ -179,7 +301,11 @@ export class Game {
         }
       }
     }
-    if (loopDetected) {
+    // Hide the hovering piece immediately after placement so the loop
+    // is visible as a whole during the removal animation.
+    this.currentPiece = null;
+    this.state.currentPiece = null;
+  if (loopDetected) {
       // Deduplicate loop cells and start removal animation
       const key = (c: { x: number; y: number }) => `${c.x},${c.y}`;
       const seen = new Set<string>();
@@ -196,14 +322,9 @@ export class Game {
       this.loopRemoval.active = true;
       this.loopRemoval.lastTime = performance.now();
       // Score will be awarded when animation completes
-      console.log(`Loop detected on placement (${unique.length} cells will be removed)`);
+      // Loop detected — start removal animation
     } else {
-      console.log('No loop detected on placement');
-      // Also log full board state (rows)
-      console.log('Board state:');
-      for (let yy = 0; yy < this.board.height; yy++) {
-        console.log(this.board.grid[yy].join(' '));
-      }
+      // No loop detected on placement
       // Only spawn a new piece immediately if no loop animation is running
       this.spawnPiece();
     }
@@ -213,19 +334,34 @@ export class Game {
   update(now: number) {
     if (!this.loopRemoval.active) return;
     const lr = this.loopRemoval;
-    if (now - lr.lastTime >= lr.interval) {
+      if (now - lr.lastTime >= lr.interval) {
       // remove next cell
       const c = lr.cells[lr.index];
       if (c && c.y >= 0 && c.y < this.board.height && c.x >= 0 && c.x < this.board.width) {
         this.board.setCell(c.x, c.y, CELL_EMPTY);
+        // Each removed tile modifies score by pointsPerTile (can be negative)
+        const ppt = lr.pointsPerTile ?? 1;
+        this.addScore(ppt);
       }
       lr.index++;
       lr.lastTime = now;
       // If finished
       if (lr.index >= lr.cells.length) {
         lr.active = false;
-        // Award score and then spawn next piece
-        this.addScore(1000);
+        // If the board is completely empty after removal, double the score
+        let boardEmpty = true;
+        for (let yy = 0; yy < this.board.height && boardEmpty; yy++) {
+          for (let xx = 0; xx < this.board.width; xx++) {
+            if (this.board.grid[yy][xx] !== CELL_EMPTY) {
+              boardEmpty = false;
+              break;
+            }
+          }
+        }
+        if (boardEmpty) {
+          this.state.score = this.state.score * 2;
+        }
+        // After animation completes, spawn next hovering piece
         this.spawnPiece();
       }
     }

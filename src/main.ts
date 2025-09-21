@@ -9,12 +9,14 @@ const renderer = new Renderer('gameCanvas');
 
 function renderBoard() {
   renderer.clear();
-  renderer.drawText(`Score: ${game.state.score}`, 10, 30, 'blue');
-  renderer.drawBoard(game.state.board);
+  renderer.drawBoard(game.state.board, game.state.score);
   if (game.state.currentPiece) {
-    renderer.drawPiece(game.state.currentPiece);
+    renderer.drawPiece(game.state.currentPiece, game.state.board);
   }
 }
+
+// Fit canvas to viewport so the full logical layout is visible
+window.addEventListener('resize', () => renderer.fitToViewport(game.state.board));
 
 function gameLoop() {
   renderBoard();
@@ -27,6 +29,8 @@ function gameLoop() {
 
 function startGame() {
   game.start();
+  // initial fit
+  renderer.fitToViewport(game.state.board);
   gameLoop();
 }
 
