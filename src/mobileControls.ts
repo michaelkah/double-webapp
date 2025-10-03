@@ -68,12 +68,12 @@ export class MobileControls {
         startPieceX = 0;
         startPieceY = 0;
       }
-      // Start a long-press timer (600ms). If it fires, place the piece.
+      // Start a long-press timer (250ms). If it fires, place the piece.
       longPressTimeout = window.setTimeout(() => {
         longPress = true;
         this.onPlace();
         longPressTimeout = null;
-      }, 600);
+      }, 250);
     };
 
     const touchmove = (e: TouchEvent) => {
