@@ -48,10 +48,14 @@ export class Renderer {
   computeCellSize(board: import('./board').Board) {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    // Ensure the board fits both horizontally and vertically.
-    const cellByHeight = Math.floor(vh / board.height);
+    // New sizing rule:
+    // - board width should fill the screen width: board.width * s = vw  => s = vw / board.width
+    // - board height should be screen height minus two cell heights: board.height * s = vh - 2*s
+    //   => s * (board.height + 2) = vh => s = vh / (board.height + 2)
+    // Choose the smaller s so both constraints are satisfied.
     const cellByWidth = Math.floor(vw / board.width);
-    const cellSize = Math.max(8, Math.min(cellByHeight, cellByWidth));
+    const cellByHeightWithPadding = Math.floor(vh / (board.height + 2));
+    const cellSize = Math.max(8, Math.min(cellByWidth, cellByHeightWithPadding));
     return cellSize;
   }
 
@@ -68,11 +72,11 @@ export class Renderer {
     const cellSize = this.computeCellSize(board);
     this.lastCellSize = cellSize;
 
-  // Place board at the bottom of the canvas; horizontally centered.
+  // Compute board pixel size and center the board horizontally and vertically.
   const boardW = board.width * cellSize;
   const boardH = board.height * cellSize;
   const offsetX = Math.floor((this.canvas.width - boardW) / 2);
-  const offsetY = Math.max(0, this.canvas.height - boardH); // bottom-aligned
+  const offsetY = Math.floor((this.canvas.height - boardH) / 2);
 
     for (let y = 0; y < board.height; y++) {
       for (let x = 0; x < board.width; x++) {
@@ -102,10 +106,9 @@ export class Renderer {
   const board: import('./board').Board = state.board;
   const cellSize = this.lastCellSize || this.computeCellSize(board);
   const boardW = board.width * cellSize;
-  const boardH = board.height * cellSize;
-  const offsetX = Math.floor((this.canvas.width - boardW) / 2);
-  // Top Y of the board when the board is bottom-aligned in the canvas
-  const offsetY = Math.max(0, this.canvas.height - boardH);
+    const boardH = board.height * cellSize;
+    const offsetX = Math.floor((this.canvas.width - boardW) / 2);
+    const offsetY = Math.floor((this.canvas.height - boardH) / 2);
 
     // Highscore and score are relative to the board (drawn within the
     // top area of the board region). Both are bold, beige and semi-opaque.
@@ -125,23 +128,31 @@ export class Renderer {
     this.ctx.fillText(String(state.score ?? 0), offsetX + boardW - pad, offsetY + pad);
     this.ctx.restore();
 
-    // Draw timer bar on top: it fills the entire area above the board (from y=0 to offsetY).
+    // Draw timer bar as a HUD on the board (50% opacity).
+    // Position: x = cellSize/2 from left edge of board; width = 9 cells; y = 1.5 cells from bottom; height = 1 cell.
     if (typeof state.timerRemaining === 'number' && typeof state.timerDuration === 'number') {
-      const timerY = 0;
-  // Timer height equals the gap above the bottom-aligned board,
-  // but ensure a minimum height of one cell so the bar is always visible.
-  const minTimerH = Math.max(1, Math.floor(cellSize));
-  const timerH = Math.max(minTimerH, offsetY);
-      const fullW = boardW;
       const pct = Math.max(0, Math.min(1, state.timerRemaining / state.timerDuration));
-      const barW = Math.floor(fullW * pct);
-      const beigeColor = '#f5f0d7';
-      if (timerH > 0 && barW > 0) {
-        // Draw the filled portion aligned with the board horizontally
+  const desiredX = offsetX + Math.floor(cellSize / 2);
+      const desiredW = Math.floor(9 * cellSize);
+      // Clamp width so it doesn't overflow the board area (leave at least half-cell padding on right)
+      const maxW = Math.max(0, boardW - Math.floor(cellSize));
+      const timerW = Math.min(desiredW, maxW);
+      const timerX = desiredX;
+      const timerH = Math.floor(cellSize);
+  const timerY = offsetY + boardH - Math.floor(cellSize * 1.5);
+      if (timerW > 0 && timerH > 0) {
+        this.ctx.save();
+        this.ctx.globalAlpha = 0.5; // 50% opacity per request
+        const beigeColor = '#f5f0d7';
+        // Background (empty) bar - draw a darker translucent background for contrast
+        this.ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        this.ctx.fillRect(timerX, timerY, timerW, timerH);
+        // Filled portion
         this.ctx.fillStyle = beigeColor;
-        this.ctx.fillRect(offsetX, timerY, barW, timerH);
+        const filledW = Math.floor(timerW * pct);
+        if (filledW > 0) this.ctx.fillRect(timerX, timerY, filledW, timerH);
+        this.ctx.restore();
       }
-      // No border around the timer per request
     }
 
     // If game over, overlay centered text inside the board area
@@ -172,7 +183,9 @@ export class Renderer {
     const cellSize = this.computeCellSize(board);
     const boardW = board.width * cellSize;
     const boardH = board.height * cellSize;
-    // No images and score is drawn inside the board, so logical height = board height
+    // We reserve two cell heights of vertical space (one above and one below)
+    // per the sizing rule; however computeLayout should report the actual
+    // board pixel dimensions (used by fitToViewport/layout logic).
     return { width: boardW, height: boardH };
   }
 
@@ -195,11 +208,11 @@ export class Renderer {
 
   drawPiece(piece: import('./piece').Piece, board: import('./board').Board) {
     const cellSize = this.lastCellSize || this.computeCellSize(board);
-    // Compute offsets in the same way drawBoard does (top-aligned)
-    const boardW = board.width * cellSize;
-    const boardH = board.height * cellSize;
-    const offsetX = Math.floor((this.canvas.width - boardW) / 2);
-    const offsetY = Math.max(0, this.canvas.height - boardH);
+  // Compute offsets in the same way drawBoard does (centered)
+  const boardW = board.width * cellSize;
+  const boardH = board.height * cellSize;
+  const offsetX = Math.floor((this.canvas.width - boardW) / 2);
+  const offsetY = Math.floor((this.canvas.height - boardH) / 2);
     // piece.shape is [x][y]
     const s = piece.shape;
     const w = s.length;

@@ -11,6 +11,8 @@ export type GameState = {
   // timer in milliseconds remaining
   timerRemaining?: number;
   timerDuration?: number;
+  // whether restarting after game over is currently allowed
+  canRestart?: boolean;
 };
 
 // ...existing code...
@@ -20,7 +22,7 @@ export class Game {
   board: Board;
   currentPiece: Piece | null;
   // Timer settings
-  private timerDuration = 10000; // 10 seconds
+  private timerDuration = 9000; // 9 seconds
   private lastTimerTick = 0; // ms
   // loop removal animation state
   private loopRemoval: {
@@ -31,6 +33,7 @@ export class Game {
     interval: number; // ms per tile
     pointsPerTile?: number;
   };
+  private restartTimeoutId: number | null = null;
 
   constructor() {
     this.board = new Board();
@@ -45,9 +48,21 @@ export class Game {
       isGameOver: false,
       timerRemaining: this.timerDuration,
       timerDuration: this.timerDuration,
+      canRestart: true,
     };
   this.loadHighScoreFromStorage();
   // Do not spawn a piece here; startGame will handle it
+  }
+
+  // Small vibration helper (wrap navigator.vibrate safely)
+  private vibrate(pattern: number | number[] = 30) {
+    try {
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator && typeof (navigator as any).vibrate === 'function') {
+        (navigator as any).vibrate(pattern);
+      }
+    } catch (e) {
+      // ignore on platforms that don't support vibration
+    }
   }
 
   // Load high score from localStorage if present
@@ -64,6 +79,8 @@ export class Game {
   }
 
   start() {
+    // Don't allow starting if a recent game-over restart cooldown is active
+    if (this.state.isGameOver && this.state.canRestart === false) return;
     this.state.isRunning = true;
     this.state.score = 0;
     this.board.reset();
@@ -77,6 +94,15 @@ export class Game {
   end() {
     this.state.isRunning = false;
     this.state.isGameOver = true;
+    // Prevent restart for 2 seconds
+    this.state.canRestart = false;
+    if (this.restartTimeoutId !== null) {
+      window.clearTimeout(this.restartTimeoutId);
+    }
+    this.restartTimeoutId = window.setTimeout(() => {
+      this.state.canRestart = true;
+      this.restartTimeoutId = null;
+    }, 2000);
     this.saveHighScore();
     try {
       const top = this.state.highScores[0] ?? 0;
@@ -212,6 +238,10 @@ export class Game {
       this.currentPiece.x = oldX;
       this.currentPiece.y = oldY;
     }
+    else {
+      // Provide light haptic feedback on a successful rotation
+      this.vibrate(20);
+    }
   }
 
   // Only used for placement now
@@ -300,6 +330,8 @@ export class Game {
         // Hide hovering piece
         this.currentPiece = null;
         this.state.currentPiece = null;
+        // Haptic feedback for removal action
+        this.vibrate([20, 10, 20]);
         return;
       } else {
         // Not enough score, fall through to normal placement
@@ -343,6 +375,8 @@ export class Game {
     // is visible as a whole during the removal animation.
     this.currentPiece = null;
     this.state.currentPiece = null;
+    // Haptic on successful placement
+    this.vibrate(30);
   if (loopDetected) {
       // Deduplicate loop cells and start removal animation
       const key = (c: { x: number; y: number }) => `${c.x},${c.y}`;

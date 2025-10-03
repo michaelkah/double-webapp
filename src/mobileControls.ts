@@ -100,12 +100,17 @@ export class MobileControls {
       const minYAllowed = -minRow;
       const maxYAllowed = layout.board.height - 1 - maxRow;
 
-      // Finger movement in pixels maps directly to fractional cell movement
-      const desiredX = startPieceX + dx / layout.cellSize;
-      const desiredY = startPieceY + dy / layout.cellSize;
-      // Clamp to allowed range but keep fractional value for smooth 1:1 feel
-      piece.x = Math.min(maxXAllowed, Math.max(minXAllowed, desiredX));
-      piece.y = Math.min(maxYAllowed, Math.max(minYAllowed, desiredY));
+  // Finger movement in pixels maps to cell movement, but snap to integer
+  // cells so the piece always stays on the grid.
+  const desiredX = startPieceX + dx / layout.cellSize;
+  const desiredY = startPieceY + dy / layout.cellSize;
+  let snappedX = Math.round(desiredX);
+  let snappedY = Math.round(desiredY);
+  // Clamp snapped values into allowed range
+  snappedX = Math.min(maxXAllowed, Math.max(minXAllowed, snappedX));
+  snappedY = Math.min(maxYAllowed, Math.max(minYAllowed, snappedY));
+  piece.x = snappedX;
+  piece.y = snappedY;
       // notify for redraw
       this.onUpdate();
     };

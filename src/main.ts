@@ -80,6 +80,7 @@ new MobileControls({
 window.addEventListener('keydown', (e) => {
   // If game over, allow Space/Enter to restart
   if (game.state.isGameOver && (e.key === ' ' || e.key.toLowerCase() === 'enter')) {
+    if (game.state.canRestart === false) return;
     startGame();
     return;
   }
