@@ -11,6 +11,7 @@ export class Renderer {
   private boardImages: Record<number, HTMLImageElement>;
   private gameOverImg: HTMLImageElement;
   private pausedImg: HTMLImageElement;
+  private doubleImg: HTMLImageElement;
   // last computed cell size in device pixels
   private lastCellSize = 40;
 
@@ -40,7 +41,42 @@ export class Renderer {
     this.gameOverImg.src = '/gameover.png';
   this.pausedImg = new window.Image();
   this.pausedImg.src = '/paused.png';
+    this.doubleImg = new window.Image();
+    this.doubleImg.src = '/double.gif';
     // No logo/author images anymore
+  }
+
+  // Preload all images used by the renderer and return a Promise that
+  // resolves when all have finished loading (or errored).
+  preload(): Promise<void> {
+    const imgs: HTMLImageElement[] = [];
+    for (const k of Object.keys(this.cellImages)) imgs.push(this.cellImages[Number(k)]);
+    for (const k of Object.keys(this.boardImages)) imgs.push(this.boardImages[Number(k)]);
+    imgs.push(this.gameOverImg);
+    imgs.push(this.pausedImg);
+    imgs.push(this.doubleImg);
+
+    const promises = imgs.map((img) => {
+      return new Promise<void>((resolve) => {
+        if (img.complete && img.naturalWidth) return resolve();
+        const onLoad = () => {
+          cleanup();
+          resolve();
+        };
+        const onErr = () => {
+          cleanup();
+          // Resolve even on error to avoid blocking the app; fallback drawing handles missing images
+          resolve();
+        };
+        const cleanup = () => {
+          img.removeEventListener('load', onLoad);
+          img.removeEventListener('error', onErr);
+        };
+        img.addEventListener('load', onLoad);
+        img.addEventListener('error', onErr);
+      });
+    });
+    return Promise.all(promises).then(() => undefined);
   }
 
   clear() {
@@ -121,6 +157,25 @@ export class Renderer {
     // top area of the board region). Both are bold, beige and semi-opaque.
     const beige = '#f5f0d7';
     const alpha = 0.5;
+    // Compute double-flash on/off state if active (state.doubleFlashStart)
+    let doubleOpacity = 0;
+    const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+    if (state.doubleFlashStart && typeof state.doubleFlashDuration === 'number' && typeof state.doubleFlashCount === 'number') {
+      const elapsed = now - state.doubleFlashStart;
+      const duration = state.doubleFlashDuration;
+      const flashes = Math.max(1, state.doubleFlashCount);
+      // Only consider the flash active for elapsed strictly less than duration.
+      // Using '<' prevents a final micro-flash when elapsed == duration.
+      if (elapsed < duration) {
+        const flashDur = duration / flashes;
+        const within = elapsed % flashDur;
+        const pct = within / flashDur; // 0..1
+        // Hard flash: on for first half of each flash period, off for second half.
+        doubleOpacity = pct < 0.5 ? 1 : 0;
+      } else {
+        // Do not mutate game state here; simply treat as finished (doubleOpacity remains 0).
+      }
+    }
     const fontSize = Math.max(12, Math.floor(cellSize));
     this.ctx.save();
     this.ctx.fillStyle = beige;
@@ -132,7 +187,15 @@ export class Renderer {
     const pad = Math.floor(cellSize / 2);
     this.ctx.fillText(`HI ${hi}`, offsetX + pad, offsetY + pad);
     this.ctx.textAlign = 'right';
-    this.ctx.fillText(String(state.score ?? 0), offsetX + boardW - pad, offsetY + pad);
+    // If double flash is active, show/hide the score (hard flash). Otherwise draw normally.
+    if (state.doubleFlashStart && doubleOpacity > 0) {
+      this.ctx.save();
+      this.ctx.globalAlpha = doubleOpacity; // 1 or 0
+      this.ctx.fillText(String(state.score ?? 0), offsetX + boardW - pad, offsetY + pad);
+      this.ctx.restore();
+    } else {
+      this.ctx.fillText(String(state.score ?? 0), offsetX + boardW - pad, offsetY + pad);
+    }
     this.ctx.restore();
 
     // Draw timer bar as a HUD on the board (50% opacity).
@@ -222,6 +285,30 @@ export class Renderer {
         this.ctx.fillText('GAME OVER', cx, cy);
       }
       this.ctx.restore();
+    }
+
+    // Draw double.gif flash if requested (draw after overlays so it appears on top)
+    if (state.doubleFlashStart && doubleOpacity > 0) {
+      const img = this.doubleImg;
+      if (img && img.complete && img.naturalWidth) {
+        let iw = img.naturalWidth;
+        let ih = img.naturalHeight;
+        // Target width: 90% of board width
+        let drawW = Math.floor(boardW * 0.9);
+        let drawH = Math.floor((ih * drawW) / iw);
+        // If the computed height exceeds the board height, clamp by height
+        if (drawH > boardH) {
+          drawH = boardH;
+          drawW = Math.floor((iw * drawH) / ih);
+        }
+        const dx = offsetX + Math.floor((boardW - drawW) / 2);
+        const dy = offsetY + Math.floor((boardH - drawH) / 2);
+        this.ctx.save();
+        this.ctx.globalAlpha = Math.max(0.05, doubleOpacity);
+        // Draw the image centered and scaled
+        this.ctx.drawImage(img, dx, dy, drawW, drawH);
+        this.ctx.restore();
+      }
     }
   }
 

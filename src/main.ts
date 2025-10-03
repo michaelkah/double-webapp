@@ -7,6 +7,16 @@ import { MobileControls } from './mobileControls';
 const game = new Game();
 const renderer = new Renderer('gameCanvas');
 
+// Preload assets before starting the game to avoid first-frame image pop-in
+async function init() {
+  try {
+    await renderer.preload();
+  } catch (e) {
+    // ignore preload errors; renderer falls back to colored cells
+  }
+  startGame();
+}
+
 function renderBoard() {
   renderer.clear();
   renderer.drawBoard(game.state.board);
@@ -176,5 +186,5 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-// Start game automatically
-startGame();
+// Start game automatically after preloading images
+init();

@@ -14,6 +14,10 @@ export type GameState = {
   timerDuration?: number;
   // whether restarting after game over is currently allowed
   canRestart?: boolean;
+  // Optional fields to trigger the double-board flash animation
+  doubleFlashStart?: number; // performance.now() ms when flash started
+  doubleFlashDuration?: number; // total duration in ms
+  doubleFlashCount?: number; // number of flashes to perform
 };
 
 // ...existing code...
@@ -33,6 +37,7 @@ export class Game {
     lastTime: number; // ms
     interval: number; // ms per tile
     pointsPerTile?: number;
+    exactMatch?: boolean;
   };
   private restartTimeoutId: number | null = null;
   
@@ -328,32 +333,31 @@ export class Game {
     }
 
     if (exactMatch && nonEmptyCount > 0) {
-      // We can remove these tiles instead of placing, but only if player has enough score
-      const cost = 2 * nonEmptyCount;
-      if (this.state.score >= cost) {
-        // Schedule removal animation for these tiles with negative points per tile
-        const cellsToRemove: { x: number; y: number }[] = [];
-        for (let x = 0; x < w; x++) {
-          for (let y = 0; y < h; y++) {
-            if (s[x][y]) {
-              cellsToRemove.push({ x: this.currentPiece.x + x, y: this.currentPiece.y + y });
-            }
+      // We can remove these tiles instead of placing. Exact-match removals
+      // now always run and will apply a single halving of the current
+      // score (rounded up) when the removal animation completes. They do
+      // not apply per-tile negative scoring during the animation.
+      const cellsToRemove: { x: number; y: number }[] = [];
+      for (let x = 0; x < w; x++) {
+        for (let y = 0; y < h; y++) {
+          if (s[x][y]) {
+            cellsToRemove.push({ x: this.currentPiece.x + x, y: this.currentPiece.y + y });
           }
         }
-        this.loopRemoval.cells = cellsToRemove;
-        this.loopRemoval.index = 0;
-        this.loopRemoval.active = true;
-        this.loopRemoval.lastTime = performance.now();
-        this.loopRemoval.pointsPerTile = -2; // cost per tile
-        // Hide hovering piece
-        this.currentPiece = null;
-        this.state.currentPiece = null;
-        // Haptic feedback for removal action
-        this.vibrate([20, 10, 20]);
-        return;
-      } else {
-        // Not enough score, fall through to normal placement
       }
+      this.loopRemoval.cells = cellsToRemove;
+      this.loopRemoval.index = 0;
+      this.loopRemoval.active = true;
+      this.loopRemoval.lastTime = performance.now();
+      // Mark this removal as an exact-match removal so scoring logic
+      // knows to apply a single halving at the end.
+      this.loopRemoval.exactMatch = true;
+      // Hide hovering piece
+      this.currentPiece = null;
+      this.state.currentPiece = null;
+      // Haptic feedback for removal action
+      this.vibrate([20, 10, 20]);
+      return;
     }
     // For normal placement (not exact-match removal), ensure there's no collision
     if (this.checkPlacementCollision(this.currentPiece)) {
@@ -436,6 +440,13 @@ export class Game {
             // Time's up -> try to auto-place the current piece. If placement
             // collides, it's game over. If no current piece exists, also game over.
             if (this.currentPiece) {
+              // Auto-drop penalty: when the timer forces an auto-drop, deduct
+              // 10 points (minimum 0). This applies for any auto-drop — both
+              // exact-match removals and normal auto-placement. The deduction
+              // happens before placement/removal logic so subsequent halving
+              // (for exact-match) applies to the reduced score.
+              this.state.score = Math.max(0, (this.state.score || 0) - 10);
+
               // First, check for exact-match removal possibility (auto-removal):
               // piece's non-empty tiles must match the board's tiles exactly.
               const s = this.currentPiece.shape;
@@ -469,30 +480,26 @@ export class Game {
               }
 
               if (exactMatch && nonEmptyCount > 0) {
-                // Attempt costly removal if the player has enough score
-                const cost = 2 * nonEmptyCount;
-                if (this.state.score >= cost) {
-                  const cellsToRemove: { x: number; y: number }[] = [];
-                  for (let x = 0; x < w; x++) {
-                    for (let y = 0; y < h; y++) {
-                      if (s[x][y]) {
-                        cellsToRemove.push({ x: this.currentPiece.x + x, y: this.currentPiece.y + y });
-                      }
+                // Exact-match removal on timer expiry: schedule removal and
+                // mark it as exactMatch. We no longer require a minimum score
+                // to perform this; the halving will be applied at animation end.
+                const cellsToRemove: { x: number; y: number }[] = [];
+                for (let x = 0; x < w; x++) {
+                  for (let y = 0; y < h; y++) {
+                    if (s[x][y]) {
+                      cellsToRemove.push({ x: this.currentPiece.x + x, y: this.currentPiece.y + y });
                     }
                   }
-                  this.loopRemoval.cells = cellsToRemove;
-                  this.loopRemoval.index = 0;
-                  this.loopRemoval.active = true;
-                  this.loopRemoval.lastTime = performance.now();
-                  this.loopRemoval.pointsPerTile = -2; // costly removal
-                  // Hide hovering piece
-                  this.currentPiece = null;
-                  this.state.currentPiece = null;
-                  // timer will be reset when spawnPiece runs after removal
-                } else {
-                  // Not enough score to perform the costly removal -> game over
-                  this.end();
                 }
+                this.loopRemoval.cells = cellsToRemove;
+                this.loopRemoval.index = 0;
+                this.loopRemoval.active = true;
+                this.loopRemoval.lastTime = performance.now();
+                this.loopRemoval.exactMatch = true;
+                // Hide hovering piece
+                this.currentPiece = null;
+                this.state.currentPiece = null;
+                // timer will be reset when spawnPiece runs after removal
               } else {
                 // Not an exact-match removal; fall back to normal auto-place
                 if (this.checkPlacementCollision(this.currentPiece)) {
@@ -522,9 +529,20 @@ export class Game {
       const c = lr.cells[lr.index];
       if (c && c.y >= 0 && c.y < this.board.height && c.x >= 0 && c.x < this.board.width) {
         this.board.setCell(c.x, c.y, CELL_EMPTY);
-        // Each removed tile modifies score by pointsPerTile (can be negative)
-        const ppt = lr.pointsPerTile ?? 1;
-        this.addScore(ppt);
+        // For exact-match removals we do not apply per-tile scoring during
+        // the animation. Instead, a single halving will be applied once
+        // when the entire removal completes. For normal removals we keep
+        // the existing behavior.
+        if (!lr.exactMatch) {
+          const ppt = lr.pointsPerTile ?? 1;
+          if (ppt > 0) {
+            // progressive scoring: (index+1) * ppt
+            this.addScore((lr.index + 1) * ppt);
+          } else {
+            // costly removal: constant negative per tile
+            this.addScore(ppt);
+          }
+        }
       }
       lr.index++;
       lr.lastTime = now;
@@ -533,6 +551,15 @@ export class Game {
         lr.active = false;
         // reset pointsPerTile back to default for future removals
         lr.pointsPerTile = 1;
+        // If this was an exact-match removal, apply the one-time halving
+        // of the current score (rounded up). This operation must happen
+        // once per removal operation, not per tile.
+        if (lr.exactMatch) {
+          // allow removal even when score is 0; ceil(score/2) handles 0 -> 0
+          this.state.score = Math.ceil(this.state.score / 2);
+          // clear the flag for future removals
+          lr.exactMatch = false;
+        }
         // If the board is completely empty after removal, double the score
         let boardEmpty = true;
         for (let yy = 0; yy < this.board.height && boardEmpty; yy++) {
@@ -545,6 +572,11 @@ export class Game {
         }
         if (boardEmpty) {
           this.state.score = this.state.score * 2;
+          // Trigger double-flash animation: show double.gif centered on the
+          // board at 90% width and flash the score. Flash 3 times within 2s.
+          this.state.doubleFlashStart = performance.now();
+          this.state.doubleFlashDuration = 2000; // ms
+          this.state.doubleFlashCount = 3;
         }
         // After animation completes, spawn next hovering piece
         this.spawnPiece();
