@@ -18,6 +18,7 @@ export class MobileControls {
   private onRotateLeft: () => void;
   private onRotateRight: () => void;
   private onUpdate: () => void;
+  private onRestart?: () => boolean;
 
   constructor(opts: {
     canvasId: string;
@@ -27,6 +28,7 @@ export class MobileControls {
     onRotateLeft: () => void;
     onRotateRight: () => void;
     onUpdate: () => void; // redraw callback
+    onRestart?: () => boolean; // return true if restart handled
   }) {
   const canvas = document.getElementById(opts.canvasId) as HTMLCanvasElement;
   if (!canvas) throw new Error('Canvas element not found');
@@ -35,7 +37,8 @@ export class MobileControls {
     this.onPlace = opts.onPlace;
     this.onRotateLeft = opts.onRotateLeft;
     this.onRotateRight = opts.onRotateRight;
-    this.onUpdate = opts.onUpdate;
+  this.onUpdate = opts.onUpdate;
+  this.onRestart = opts.onRestart;
 
     let startX = 0;
     let startY = 0;
@@ -43,6 +46,7 @@ export class MobileControls {
     let startPieceY = 0;
     let dragging = false;
     let moved = false;
+  let startOnPiece = false;
 
     const touchstart = (e: TouchEvent) => {
       const t = e.touches[0];
@@ -50,6 +54,7 @@ export class MobileControls {
       startY = t.clientY;
       moved = false;
       dragging = false;
+      startOnPiece = false;
       const p = this.getCurrentPiece();
       if (p) {
         startPieceX = p.x;
@@ -57,6 +62,17 @@ export class MobileControls {
       } else {
         startPieceX = 0;
         startPieceY = 0;
+      }
+      // detect whether the touch started on the current piece bounding box
+      const layout = this.getLayout();
+      if (p) {
+        const pieceLeft = layout.offsetX + p.x * layout.cellSize;
+        const pieceTop = layout.offsetY + p.y * layout.cellSize;
+        const pieceW = p.shape.length * layout.cellSize;
+        const pieceH = p.shape[0].length * layout.cellSize;
+        if (t.clientX >= pieceLeft && t.clientX <= pieceLeft + pieceW && t.clientY >= pieceTop && t.clientY <= pieceTop + pieceH) {
+          startOnPiece = true;
+        }
       }
     };
 
@@ -119,10 +135,15 @@ export class MobileControls {
       const t = e.changedTouches[0];
       const dx = t.clientX - startX;
       const dy = t.clientY - startY;
-      // Treat small movements as taps
-      if (!moved || (Math.abs(dx) < 8 && Math.abs(dy) < 8)) {
+      // Treat small movements as taps. If the touch started on the piece and
+      // the user didn't drag, prefer placement to avoid accidental rotation.
+      if ((!moved || (Math.abs(dx) < 8 && Math.abs(dy) < 8)) || (startOnPiece && !dragging)) {
         // it's a tap
         const layout = this.getLayout();
+        // If an onRestart handler exists and handles the tap, exit early.
+        if (this.onRestart && this.onRestart()) {
+          return;
+        }
         const boardCenterX = layout.offsetX + (layout.board.width * layout.cellSize) / 2;
         const tapX = t.clientX;
         const tapY = t.clientY;

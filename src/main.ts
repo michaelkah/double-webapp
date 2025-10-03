@@ -74,6 +74,13 @@ new MobileControls({
     }
   },
   onUpdate: () => renderBoard(),
+  onRestart: () => {
+    if (game.state.isGameOver && game.state.canRestart !== false) {
+      startGame();
+      return true;
+    }
+    return false;
+  },
 });
 
 // Keyboard controls for desktop

@@ -32,6 +32,13 @@ body {
   background-color: #000;
 }
 
+/* Prevent horizontal page scrolling when canvas or other elements
+   use full-viewport widths (100vw). This avoids a horizontal scrollbar
+   on desktop when the layout slightly exceeds the viewport. */
+html, body {
+  overflow-x: hidden;
+}
+
 h1 {
   font-size: 3.2em;
   line-height: 1.1;
@@ -42,6 +49,20 @@ h1 {
   margin: 0 auto;
   padding: 0;
   text-align: center;
+}
+
+/* Make the game canvas cover the viewport and be positioned relative to
+   the viewport. This prevents container constraints from shifting the
+   canvas and ensures the board centers correctly on desktop. */
+#gameCanvas {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  margin: 0;
+  touch-action: none;
 }
 
 .logo {
