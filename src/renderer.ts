@@ -48,15 +48,11 @@ export class Renderer {
   computeCellSize(board: import('./board').Board) {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    // prefer to fill height so we get left/right letterboxing; but if width
-    // is too small for that, fall back to width-based size so the board fits.
+    // Ensure the board fits both horizontally and vertically.
     const cellByHeight = Math.floor(vh / board.height);
-    if (cellByHeight <= 0) return 8;
-    if (cellByHeight * board.width <= vw) {
-      return Math.max(8, cellByHeight);
-    }
     const cellByWidth = Math.floor(vw / board.width);
-    return Math.max(8, cellByWidth);
+    const cellSize = Math.max(8, Math.min(cellByHeight, cellByWidth));
+    return cellSize;
   }
 
   drawText(text: string, x: number, y: number, color = 'black', font = '20px monospace') {
@@ -72,10 +68,11 @@ export class Renderer {
     const cellSize = this.computeCellSize(board);
     this.lastCellSize = cellSize;
 
-  // Place board at top of the canvas; horizontally centered.
+  // Place board at the bottom of the canvas; horizontally centered.
   const boardW = board.width * cellSize;
+  const boardH = board.height * cellSize;
   const offsetX = Math.floor((this.canvas.width - boardW) / 2);
-  const offsetY = 0; // top-aligned
+  const offsetY = Math.max(0, this.canvas.height - boardH); // bottom-aligned
 
     for (let y = 0; y < board.height; y++) {
       for (let x = 0; x < board.width; x++) {
@@ -102,49 +99,47 @@ export class Renderer {
 
   // Draw HUD elements like timer bar and game over text. Expects full game state
   drawHUD(state: any) {
-    const board: import('./board').Board = state.board;
-    const cellSize = this.lastCellSize || this.computeCellSize(board);
-    const boardW = board.width * cellSize;
-    const offsetX = Math.floor((this.canvas.width - boardW) / 2);
-    const offsetY = 0;
+  const board: import('./board').Board = state.board;
+  const cellSize = this.lastCellSize || this.computeCellSize(board);
+  const boardW = board.width * cellSize;
+  const boardH = board.height * cellSize;
+  const offsetX = Math.floor((this.canvas.width - boardW) / 2);
+  // Top Y of the board when the board is bottom-aligned in the canvas
+  const offsetY = Math.max(0, this.canvas.height - boardH);
 
-    // Top-left: HI #### (high score). Top-right: current score (number only).
-  const beige = '#f5f0d7';
-  const alpha = 0.5;
-  const fontSize = Math.max(12, Math.floor(cellSize)*1.2);
-  this.ctx.save();
-  this.ctx.fillStyle = beige;
-  this.ctx.globalAlpha = alpha;
-  this.ctx.font = `bold ${fontSize}px monospace`;
-  this.ctx.textBaseline = 'top';
-  // HI label (use top high score or 0)
-  const hi = (state.highScores && state.highScores[0]) ? state.highScores[0] : 0;
-  this.ctx.textAlign = 'left';
-  // Padding: half a cell size from top/left/right
-  const pad = Math.floor(cellSize / 3);
-  this.ctx.fillText(`HI ${hi}`, offsetX + pad, pad);
-  // Current score at top-right (no prefix)
-  this.ctx.textAlign = 'right';
-  this.ctx.fillText(String(state.score ?? 0), offsetX + boardW - pad, pad);
-  this.ctx.restore();
+    // Highscore and score are relative to the board (drawn within the
+    // top area of the board region). Both are bold, beige and semi-opaque.
+    const beige = '#f5f0d7';
+    const alpha = 0.5;
+    const fontSize = Math.max(12, Math.floor(cellSize));
+    this.ctx.save();
+    this.ctx.fillStyle = beige;
+    this.ctx.globalAlpha = alpha;
+    this.ctx.font = `bold ${fontSize}px monospace`;
+    this.ctx.textBaseline = 'top';
+    const hi = (state.highScores && state.highScores[0]) ? state.highScores[0] : 0;
+    this.ctx.textAlign = 'left';
+    const pad = Math.floor(cellSize / 2);
+    this.ctx.fillText(`HI ${hi}`, offsetX + pad, offsetY + pad);
+    this.ctx.textAlign = 'right';
+    this.ctx.fillText(String(state.score ?? 0), offsetX + boardW - pad, offsetY + pad);
+    this.ctx.restore();
 
-    // Draw timer bar directly below the board. Height == cellSize
+    // Draw timer bar on top: it fills the entire area above the board (from y=0 to offsetY).
     if (typeof state.timerRemaining === 'number' && typeof state.timerDuration === 'number') {
-      const timerH = cellSize;
-      const timerY = offsetY + board.height * cellSize; // immediately below board
+      const timerY = 0;
+      // Timer height equals the gap above the bottom-aligned board
+      const timerH = Math.max(0, offsetY);
       const fullW = boardW;
       const pct = Math.max(0, Math.min(1, state.timerRemaining / state.timerDuration));
       const barW = Math.floor(fullW * pct);
-      const beige = '#f5f0d7';
-      if (barW > 0) {
-        this.ctx.fillStyle = beige;
+      const beigeColor = '#f5f0d7';
+      if (timerH > 0 && barW > 0) {
+        // Draw the filled portion aligned with the board horizontally
+        this.ctx.fillStyle = beigeColor;
         this.ctx.fillRect(offsetX, timerY, barW, timerH);
       }
-      this.ctx.save();
-      this.ctx.lineWidth = Math.max(1, Math.floor(cellSize * 0.06));
-      this.ctx.strokeStyle = beige;
-      this.ctx.strokeRect(offsetX + 0.5, timerY + 0.5, fullW - 1, timerH - 1);
-      this.ctx.restore();
+      // No border around the timer per request
     }
 
     // If game over, overlay centered text inside the board area
@@ -155,15 +150,15 @@ export class Renderer {
       // Darken the whole board area so the text stands out
       this.ctx.fillStyle = 'rgba(0,0,0,0.6)';
       this.ctx.fillRect(offsetX, offsetY, boardW, board.height * cellSize);
-      // Draw large outlined text
-      const fontSize = Math.max(18, Math.floor(cellSize * 1.6));
-      this.ctx.font = `bold ${fontSize}px monospace`;
+      // Draw large outlined text in beige
+      const fontSizeGO = Math.max(18, Math.floor(cellSize * 1.6));
+      this.ctx.font = `bold ${fontSizeGO}px monospace`;
       this.ctx.textAlign = 'center';
       this.ctx.textBaseline = 'middle';
-      // Black stroke for contrast, then white fill
+      // Black stroke for contrast, then beige fill
       this.ctx.lineWidth = Math.max(2, Math.floor(cellSize * 0.08));
       this.ctx.strokeStyle = 'black';
-      this.ctx.fillStyle = 'white';
+      this.ctx.fillStyle = beige;
       this.ctx.strokeText('GAME OVER', cx, cy);
       this.ctx.fillText('GAME OVER', cx, cy);
       this.ctx.restore();
@@ -200,8 +195,9 @@ export class Renderer {
     const cellSize = this.lastCellSize || this.computeCellSize(board);
     // Compute offsets in the same way drawBoard does (top-aligned)
     const boardW = board.width * cellSize;
+    const boardH = board.height * cellSize;
     const offsetX = Math.floor((this.canvas.width - boardW) / 2);
-    const offsetY = 0;
+    const offsetY = Math.max(0, this.canvas.height - boardH);
     // piece.shape is [x][y]
     const s = piece.shape;
     const w = s.length;
