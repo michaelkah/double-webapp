@@ -46,7 +46,8 @@ export class MobileControls {
     let startPieceY = 0;
     let dragging = false;
     let moved = false;
-  let startOnPiece = false;
+    let longPressTimeout: number | null = null;
+    let longPress = false;
 
     const touchstart = (e: TouchEvent) => {
       const t = e.touches[0];
@@ -54,7 +55,11 @@ export class MobileControls {
       startY = t.clientY;
       moved = false;
       dragging = false;
-      startOnPiece = false;
+      longPress = false;
+      if (longPressTimeout !== null) {
+        window.clearTimeout(longPressTimeout);
+        longPressTimeout = null;
+      }
       const p = this.getCurrentPiece();
       if (p) {
         startPieceX = p.x;
@@ -63,17 +68,12 @@ export class MobileControls {
         startPieceX = 0;
         startPieceY = 0;
       }
-      // detect whether the touch started on the current piece bounding box
-      const layout = this.getLayout();
-      if (p) {
-        const pieceLeft = layout.offsetX + p.x * layout.cellSize;
-        const pieceTop = layout.offsetY + p.y * layout.cellSize;
-        const pieceW = p.shape.length * layout.cellSize;
-        const pieceH = p.shape[0].length * layout.cellSize;
-        if (t.clientX >= pieceLeft && t.clientX <= pieceLeft + pieceW && t.clientY >= pieceTop && t.clientY <= pieceTop + pieceH) {
-          startOnPiece = true;
-        }
-      }
+      // Start a long-press timer (600ms). If it fires, place the piece.
+      longPressTimeout = window.setTimeout(() => {
+        longPress = true;
+        this.onPlace();
+        longPressTimeout = null;
+      }, 600);
     };
 
     const touchmove = (e: TouchEvent) => {
@@ -86,7 +86,11 @@ export class MobileControls {
       if (distSq > 9) {
         dragging = true;
       }
-      if (!dragging) return;
+      // If dragging started, cancel long-press so it doesn't trigger
+      if (dragging && longPressTimeout !== null) {
+        window.clearTimeout(longPressTimeout);
+        longPressTimeout = null;
+      }
       moved = true;
       e.preventDefault();
 
@@ -116,17 +120,16 @@ export class MobileControls {
       const minYAllowed = -minRow;
       const maxYAllowed = layout.board.height - 1 - maxRow;
 
-  // Finger movement in pixels maps to cell movement, but snap to integer
-  // cells so the piece always stays on the grid.
-  const desiredX = startPieceX + dx / layout.cellSize;
-  const desiredY = startPieceY + dy / layout.cellSize;
-  let snappedX = Math.round(desiredX);
-  let snappedY = Math.round(desiredY);
-  // Clamp snapped values into allowed range
-  snappedX = Math.min(maxXAllowed, Math.max(minXAllowed, snappedX));
-  snappedY = Math.min(maxYAllowed, Math.max(minYAllowed, snappedY));
-  piece.x = snappedX;
-  piece.y = snappedY;
+      // Finger movement in pixels maps to cell movement; snap to integer
+      const desiredX = startPieceX + dx / layout.cellSize;
+      const desiredY = startPieceY + dy / layout.cellSize;
+      let snappedX = Math.round(desiredX);
+      let snappedY = Math.round(desiredY);
+      // Clamp snapped values into allowed range
+      snappedX = Math.min(maxXAllowed, Math.max(minXAllowed, snappedX));
+      snappedY = Math.min(maxYAllowed, Math.max(minYAllowed, snappedY));
+      piece.x = snappedX;
+      piece.y = snappedY;
       // notify for redraw
       this.onUpdate();
     };
@@ -135,31 +138,26 @@ export class MobileControls {
       const t = e.changedTouches[0];
       const dx = t.clientX - startX;
       const dy = t.clientY - startY;
-      // Treat small movements as taps. If the touch started on the piece and
-      // the user didn't drag, prefer placement to avoid accidental rotation.
-      if ((!moved || (Math.abs(dx) < 8 && Math.abs(dy) < 8)) || (startOnPiece && !dragging)) {
-        // it's a tap
+      // clear any pending long-press timer
+      if (longPressTimeout !== null) {
+        window.clearTimeout(longPressTimeout);
+        longPressTimeout = null;
+      }
+      // If longPress triggered, we already called onPlace in the timer; do nothing
+      if (longPress) {
+        longPress = false;
+        return;
+      }
+
+      // If this was a short tap (no drag / small movement), treat as rotate left/right
+      if (!moved || (Math.abs(dx) < 8 && Math.abs(dy) < 8)) {
         const layout = this.getLayout();
-        // If an onRestart handler exists and handles the tap, exit early.
+        // If an onRestart handler exists and handles the tap (e.g., during game over), exit early.
         if (this.onRestart && this.onRestart()) {
           return;
         }
         const boardCenterX = layout.offsetX + (layout.board.width * layout.cellSize) / 2;
         const tapX = t.clientX;
-        const tapY = t.clientY;
-        const piece = this.getCurrentPiece();
-        // If tap was on the current piece bounding box, place it
-        if (piece) {
-          const pieceLeft = layout.offsetX + piece.x * layout.cellSize;
-          const pieceTop = layout.offsetY + piece.y * layout.cellSize;
-          const pieceW = piece.shape.length * layout.cellSize;
-          const pieceH = piece.shape[0].length * layout.cellSize;
-          if (tapX >= pieceLeft && tapX <= pieceLeft + pieceW && tapY >= pieceTop && tapY <= pieceTop + pieceH) {
-            this.onPlace();
-            return;
-          }
-        }
-        // Not on piece -> rotate left/right depending on which half of the board
         if (tapX < boardCenterX) this.onRotateLeft();
         else this.onRotateRight();
         return;
