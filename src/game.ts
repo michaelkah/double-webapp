@@ -6,6 +6,7 @@ export type GameState = {
   highScores: number[];
   isRunning: boolean;
   isGameOver?: boolean;
+  paused?: boolean;
   board: Board;
   currentPiece: Piece | null;
   // timer in milliseconds remaining
@@ -34,6 +35,7 @@ export class Game {
     pointsPerTile?: number;
   };
   private restartTimeoutId: number | null = null;
+  
 
   constructor() {
     this.board = new Board();
@@ -89,6 +91,22 @@ export class Game {
     this.state.timerDuration = this.timerDuration;
     this.lastTimerTick = performance.now();
     this.spawnPiece();
+  }
+
+  pause() {
+    if (this.state.isRunning && !this.state.paused) {
+      this.state.paused = true;
+      this.state.isRunning = false;
+    }
+  }
+
+  resume() {
+    if (this.state.paused) {
+      this.state.paused = false;
+      this.state.isRunning = true;
+      // reset timer tick so timer doesn't jump
+      this.lastTimerTick = performance.now();
+    }
   }
 
   end() {

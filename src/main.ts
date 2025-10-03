@@ -22,6 +22,20 @@ function renderBoard() {
 // Fit canvas to viewport so the full logical layout is visible
 window.addEventListener('resize', () => renderer.fitToViewport(game.state.board));
 
+// Pause the game when the window loses focus, resume when it gains focus
+window.addEventListener('blur', () => {
+  if (game.state.isRunning && !game.state.isGameOver) {
+    game.pause();
+    renderBoard();
+  }
+});
+window.addEventListener('focus', () => {
+  if (game.state.paused) {
+    // keep paused until user explicitly resumes (Space/Enter or tap)
+    renderBoard();
+  }
+});
+
 function gameLoop() {
   renderBoard();
   // update game animation state (pass timestamp)
@@ -57,6 +71,13 @@ new MobileControls({
   },
   getCurrentPiece: () => game.state.currentPiece,
   onPlace: () => {
+    if (game.state.paused) {
+      game.resume();
+      // Resume rendering loop
+      renderer.fitToViewport(game.state.board);
+      gameLoop();
+      return;
+    }
     game.placePiece();
     renderBoard();
   },
@@ -79,6 +100,12 @@ new MobileControls({
       startGame();
       return true;
     }
+    if (game.state.paused) {
+      game.resume();
+      renderer.fitToViewport(game.state.board);
+      gameLoop();
+      return true;
+    }
     return false;
   },
 });
@@ -89,6 +116,13 @@ window.addEventListener('keydown', (e) => {
   if (game.state.isGameOver && (e.key === ' ' || e.key.toLowerCase() === 'enter')) {
     if (game.state.canRestart === false) return;
     startGame();
+    return;
+  }
+  // If paused, allow Space/Enter to resume
+  if (game.state.paused && (e.key === ' ' || e.key.toLowerCase() === 'enter')) {
+    game.resume();
+    renderer.fitToViewport(game.state.board);
+    gameLoop();
     return;
   }
   if (!game.state.currentPiece || !game.state.isRunning) return;

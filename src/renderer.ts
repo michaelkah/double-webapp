@@ -9,6 +9,8 @@ export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private cellImages: Record<number, HTMLImageElement>;
   private boardImages: Record<number, HTMLImageElement>;
+  private gameOverImg: HTMLImageElement;
+  private pausedImg: HTMLImageElement;
   // last computed cell size in device pixels
   private lastCellSize = 40;
 
@@ -33,6 +35,11 @@ export class Renderer {
       img.src = '/' + filename;
       this.boardImages[Number(cellType)] = img;
     }
+    // Load game-over image (transparent PNG)
+    this.gameOverImg = new window.Image();
+    this.gameOverImg.src = '/gameover.png';
+  this.pausedImg = new window.Image();
+  this.pausedImg.src = '/paused.png';
     // No logo/author images anymore
   }
 
@@ -155,25 +162,65 @@ export class Renderer {
       }
     }
 
-    // If game over, overlay centered text inside the board area
-    if (state.isGameOver) {
-      const cx = offsetX + Math.floor(boardW / 2);
-      const cy = offsetY + Math.floor((board.height * cellSize) / 2);
+    // If paused, draw paused overlay
+    if (state.paused) {
       this.ctx.save();
-      // Darken the whole board area so the text stands out
       this.ctx.fillStyle = 'rgba(0,0,0,0.6)';
       this.ctx.fillRect(offsetX, offsetY, boardW, board.height * cellSize);
-      // Draw large outlined text in beige
-      const fontSizeGO = Math.max(18, Math.floor(cellSize * 1.6));
-      this.ctx.font = `bold ${fontSizeGO}px monospace`;
-      this.ctx.textAlign = 'center';
-      this.ctx.textBaseline = 'middle';
-      // Black stroke for contrast, then beige fill
-      this.ctx.lineWidth = Math.max(2, Math.floor(cellSize * 0.08));
-      this.ctx.strokeStyle = 'black';
-      this.ctx.fillStyle = beige;
-      this.ctx.strokeText('GAME OVER', cx, cy);
-      this.ctx.fillText('GAME OVER', cx, cy);
+      const img = this.pausedImg;
+      if (img && img.complete && img.naturalWidth) {
+        let iw = img.naturalWidth;
+        let ih = img.naturalHeight;
+        // Target width: 90% of board width
+        let drawW = Math.floor(boardW * 0.9);
+        let drawH = Math.floor((ih * drawW) / iw);
+        // If the computed height exceeds the board height, clamp by height
+        if (drawH > boardH) {
+          drawH = boardH;
+          drawW = Math.floor((iw * drawH) / ih);
+        }
+        const dx = offsetX + Math.floor((boardW - drawW) / 2);
+        const dy = offsetY + Math.floor((boardH - drawH) / 2);
+        this.ctx.drawImage(img, dx, dy, drawW, drawH);
+      }
+      this.ctx.restore();
+    }
+
+    // If game over, overlay centered text inside the board area
+    if (state.isGameOver) {
+      // Darken the whole board area so the overlay stands out
+      this.ctx.save();
+      this.ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      this.ctx.fillRect(offsetX, offsetY, boardW, board.height * cellSize);
+      // Draw centered gameover image if available, otherwise fall back to text
+      const img = this.gameOverImg;
+      if (img && img.complete && img.naturalWidth) {
+        // Target width: 90% of board width; scale down as needed and clamp by height
+        let iw = img.naturalWidth;
+        let ih = img.naturalHeight;
+        let drawW = Math.floor(boardW * 0.9);
+        let drawH = Math.floor((ih * drawW) / iw);
+        if (drawH > boardH) {
+          drawH = boardH;
+          drawW = Math.floor((iw * drawH) / ih);
+        }
+        const dx = offsetX + Math.floor((boardW - drawW) / 2);
+        const dy = offsetY + Math.floor((boardH - drawH) / 2);
+        this.ctx.drawImage(img, dx, dy, drawW, drawH);
+      } else {
+        const cx = offsetX + Math.floor(boardW / 2);
+        const cy = offsetY + Math.floor((board.height * cellSize) / 2);
+        // Draw large outlined text in beige as fallback
+        const fontSizeGO = Math.max(18, Math.floor(cellSize * 1.6));
+        this.ctx.font = `bold ${fontSizeGO}px monospace`;
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.lineWidth = Math.max(2, Math.floor(cellSize * 0.08));
+        this.ctx.strokeStyle = 'black';
+        this.ctx.fillStyle = beige;
+        this.ctx.strokeText('GAME OVER', cx, cy);
+        this.ctx.fillText('GAME OVER', cx, cy);
+      }
       this.ctx.restore();
     }
   }
