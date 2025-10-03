@@ -44,16 +44,36 @@ function startGame() {
 }
 
 // Example mobile controls integration
-new MobileControls('gameCanvas', (direction) => {
-  if (!game.state.currentPiece) return;
-  if (direction === 'left') game.movePiece(-1, 0);
-  else if (direction === 'right') game.movePiece(1, 0);
-  else if (direction === 'down') game.movePiece(0, 1);
-  renderBoard();
-}, () => {
-  if (!game.state.currentPiece) return;
-  game.rotatePiece();
-  renderBoard();
+new MobileControls({
+  canvasId: 'gameCanvas',
+  getLayout: () => {
+    const board = game.state.board;
+    const cellSize = (renderer as any).lastCellSize || Math.max(8, Math.floor(window.innerHeight / board.height));
+    const boardW = board.width * cellSize;
+    const boardH = board.height * cellSize;
+    const offsetX = Math.floor((window.innerWidth - boardW) / 2);
+    const offsetY = Math.max(0, window.innerHeight - boardH);
+    return { board, cellSize, offsetX, offsetY };
+  },
+  getCurrentPiece: () => game.state.currentPiece,
+  onPlace: () => {
+    game.placePiece();
+    renderBoard();
+  },
+  onRotateLeft: () => {
+    if (game.state.currentPiece) {
+      // rotate left = 3x rotate right
+      for (let i = 0; i < 3; i++) game.rotatePiece();
+      renderBoard();
+    }
+  },
+  onRotateRight: () => {
+    if (game.state.currentPiece) {
+      game.rotatePiece();
+      renderBoard();
+    }
+  },
+  onUpdate: () => renderBoard(),
 });
 
 // Keyboard controls for desktop

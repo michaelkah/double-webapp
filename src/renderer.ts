@@ -128,8 +128,10 @@ export class Renderer {
     // Draw timer bar on top: it fills the entire area above the board (from y=0 to offsetY).
     if (typeof state.timerRemaining === 'number' && typeof state.timerDuration === 'number') {
       const timerY = 0;
-      // Timer height equals the gap above the bottom-aligned board
-      const timerH = Math.max(0, offsetY);
+  // Timer height equals the gap above the bottom-aligned board,
+  // but ensure a minimum height of one cell so the bar is always visible.
+  const minTimerH = Math.max(1, Math.floor(cellSize));
+  const timerH = Math.max(minTimerH, offsetY);
       const fullW = boardW;
       const pct = Math.max(0, Math.min(1, state.timerRemaining / state.timerDuration));
       const barW = Math.floor(fullW * pct);
