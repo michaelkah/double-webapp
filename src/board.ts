@@ -23,7 +23,7 @@ export class Board {
   height: number;
   grid: Cell[][];
 
-  constructor(width = 20, height = 10) {
+  constructor(width = 10, height = 20) {
     // Use provided dimensions (default 10x20)
     this.width = width;
     this.height = height;

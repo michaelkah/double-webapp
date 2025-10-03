@@ -321,6 +321,7 @@ export class Game {
       this.loopRemoval.index = 0;
       this.loopRemoval.active = true;
       this.loopRemoval.lastTime = performance.now();
+  this.loopRemoval.pointsPerTile = 1; // normal loop rewards 1 per tile
       // Score will be awarded when animation completes
       // Loop detected — start removal animation
     } else {
@@ -347,7 +348,9 @@ export class Game {
       lr.lastTime = now;
       // If finished
       if (lr.index >= lr.cells.length) {
-        lr.active = false;
+  lr.active = false;
+  // reset pointsPerTile back to default for future removals
+  lr.pointsPerTile = 1;
         // If the board is completely empty after removal, double the score
         let boardEmpty = true;
         for (let yy = 0; yy < this.board.height && boardEmpty; yy++) {

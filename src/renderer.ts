@@ -9,9 +9,8 @@ export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private cellImages: Record<number, HTMLImageElement>;
   private boardImages: Record<number, HTMLImageElement>;
-  private logoImage: HTMLImageElement;
-  private authorImage: HTMLImageElement;
-  private imageGap = 8;
+  // last computed cell size in device pixels
+  private lastCellSize = 40;
 
   constructor(canvasId: string) {
     const canvas = document.getElementById(canvasId) as HTMLCanvasElement;
@@ -34,18 +33,7 @@ export class Renderer {
       img.src = '/' + filename;
       this.boardImages[Number(cellType)] = img;
     }
-    // Load logo and author images (drawn below the board)
-    this.logoImage = new window.Image();
-    this.logoImage.src = '/double.gif';
-    this.authorImage = new window.Image();
-    this.authorImage.src = '/autoren.gif';
-    // Refit canvas when images load
-    this.logoImage.onload = () => {
-      if ((this as any)._lastBoard) this.fitToViewport((this as any)._lastBoard);
-    };
-    this.authorImage.onload = () => {
-      if ((this as any)._lastBoard) this.fitToViewport((this as any)._lastBoard);
-    };
+    // No logo/author images anymore
   }
 
   clear() {
@@ -54,48 +42,40 @@ export class Renderer {
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
+  // Compute a responsive square cell size that ensures the board stays in
+  // portrait orientation. If the device is in landscape, prioritize the
+  // viewport height so the board remains taller than wide (portrait).
+  computeCellSize(board: import('./board').Board) {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // prefer to fill height so we get left/right letterboxing; but if width
+    // is too small for that, fall back to width-based size so the board fits.
+    const cellByHeight = Math.floor(vh / board.height);
+    if (cellByHeight <= 0) return 8;
+    if (cellByHeight * board.width <= vw) {
+      return Math.max(8, cellByHeight);
+    }
+    const cellByWidth = Math.floor(vw / board.width);
+    return Math.max(8, cellByWidth);
+  }
+
   drawText(text: string, x: number, y: number, color = 'black', font = '20px monospace') {
     this.ctx.fillStyle = color;
     this.ctx.font = font;
     this.ctx.fillText(text, x, y);
   }
 
-  drawBoard(board: import('./board').Board, score?: number) {
+  drawBoard(board: import('./board').Board) {
     // remember last board for responsive fitting
     (this as any)._lastBoard = board;
-  const cellSize = 40; // scale factor 2 (was 20)
-    const boardW = board.width * cellSize;
-    const boardH = board.height * cellSize;
-    const offsetX = Math.floor((this.canvas.width - boardW) / 2);
-    // Compute image displayed sizes
-    let logoH = 0;
-    let logoW = 0;
-    if (this.logoImage && this.logoImage.complete && this.logoImage.naturalWidth) {
-      logoW = Math.min(boardW, this.logoImage.naturalWidth);
-      const scale = logoW / this.logoImage.naturalWidth;
-      logoH = Math.floor(this.logoImage.naturalHeight * scale);
-    }
-    let authorH = 0;
-    let authorW = 0;
-    if (this.authorImage && this.authorImage.complete && this.authorImage.naturalWidth) {
-      authorW = Math.min(boardW, this.authorImage.naturalWidth);
-      const scale = authorW / this.authorImage.naturalWidth;
-      authorH = Math.floor(this.authorImage.naturalHeight * scale);
-    }
-    const imagesHeight = (logoH > 0 ? logoH + this.imageGap : 0) + (authorH > 0 ? authorH : 0);
-    const offsetY = Math.floor((this.canvas.height - (boardH + imagesHeight)) / 2);
+    // compute a responsive, square cell size
+    const cellSize = this.computeCellSize(board);
+    this.lastCellSize = cellSize;
 
-    // Draw score centered above the board
-    if (typeof score === 'number') {
-      const text = `Score: ${score}`;
-      this.ctx.fillStyle = 'white';
-      this.ctx.font = '20px monospace';
-      const m = this.ctx.measureText(text);
-      const tx = Math.floor((this.canvas.width - m.width) / 2);
-      // Place text a bit above the board; ensure it's not off-canvas
-      const ty = Math.max(22, offsetY - 8);
-      this.ctx.fillText(text, tx, ty);
-    }
+  // Place board at top of the canvas; horizontally centered.
+  const boardW = board.width * cellSize;
+  const offsetX = Math.floor((this.canvas.width - boardW) / 2);
+  const offsetY = 0; // top-aligned
 
     for (let y = 0; y < board.height; y++) {
       for (let x = 0; x < board.width; x++) {
@@ -107,92 +87,66 @@ export class Renderer {
           this.ctx.drawImage(img, px, py, cellSize, cellSize);
         } else {
           // If image not loaded yet, fill with a placeholder color
-            this.ctx.fillStyle = '#eee';
-            this.ctx.fillRect(px, py, cellSize, cellSize);
+          this.ctx.fillStyle = '#111';
+          this.ctx.fillRect(px, py, cellSize, cellSize);
         }
       }
     }
+    // no logos
+  }
 
-    // Draw logo and author images below the board, centered
-    let imgY = offsetY + boardH + this.imageGap;
-    if (logoH > 0) {
-      const drawLogoW = logoW;
-      const drawLogoH = logoH;
-      const logoX = Math.floor((this.canvas.width - drawLogoW) / 2);
-      this.ctx.drawImage(this.logoImage, 0, 0, this.logoImage.naturalWidth, this.logoImage.naturalHeight, logoX, imgY, drawLogoW, drawLogoH);
-      imgY += drawLogoH + this.imageGap;
-    }
-    if (authorH > 0) {
-      const drawAuthorW = authorW;
-      const drawAuthorH = authorH;
-      const authorX = Math.floor((this.canvas.width - drawAuthorW) / 2);
-      this.ctx.drawImage(this.authorImage, 0, 0, this.authorImage.naturalWidth, this.authorImage.naturalHeight, authorX, imgY, drawAuthorW, drawAuthorH);
-    }
+  drawScoreInside(board: import('./board').Board, score: number) {
+    // Use last computed cell size if available, otherwise compute
+    const cellSize = this.lastCellSize || this.computeCellSize(board);
+  const boardW = board.width * cellSize;
+  const offsetX = Math.floor((this.canvas.width - boardW) / 2);
+  const offsetY = 0;
+    // Draw score in top-left of the board with padding
+    const padding = Math.max(8, Math.floor(cellSize * 0.2));
+    const tx = offsetX + padding;
+    const ty = offsetY + padding + Math.floor(cellSize * 0.6); // font ascent
+    this.ctx.save();
+    // Ensure score is visible above tiles
+    this.ctx.fillStyle = 'white';
+    // Bigger and bold as requested
+    const fontSize = Math.max(14, Math.floor(cellSize * 0.6));
+    this.ctx.font = `bold ${fontSize}px monospace`;
+    this.ctx.fillText(`Score: ${score}`, tx, ty);
+    this.ctx.restore();
   }
 
   // Compute logical pixel size for the whole canvas based on board and images
   computeLayout(board: import('./board').Board) {
-    const cellSize = 40;
+    const cellSize = this.computeCellSize(board);
     const boardW = board.width * cellSize;
     const boardH = board.height * cellSize;
-    let logoH = 0;
-    let logoW = 0;
-    if (this.logoImage && this.logoImage.complete && this.logoImage.naturalWidth) {
-      logoW = Math.min(boardW, this.logoImage.naturalWidth * 2);
-      const scale = logoW / this.logoImage.naturalWidth;
-      logoH = Math.floor(this.logoImage.naturalHeight * scale);
-    }
-    let authorH = 0;
-    let authorW = 0;
-    if (this.authorImage && this.authorImage.complete && this.authorImage.naturalWidth) {
-      authorW = Math.min(boardW, this.authorImage.naturalWidth * 2);
-      const scale = authorW / this.authorImage.naturalWidth;
-      authorH = Math.floor(this.authorImage.naturalHeight * scale);
-    }
-    const imagesHeight = (logoH > 0 ? logoH + this.imageGap : 0) + (authorH > 0 ? authorH : 0);
-    const scoreArea = 32; // space for score above board
-    const totalH = boardH + imagesHeight + scoreArea + this.imageGap;
-    return { width: boardW, height: totalH };
+    // No images and score is drawn inside the board, so logical height = board height
+    return { width: boardW, height: boardH };
   }
 
   // Scale the canvas (via CSS size) so the full logical canvas fits in viewport/container
   fitToViewport(board: import('./board').Board) {
-    const layout = this.computeLayout(board);
-    const logicalW = layout.width;
-    const logicalH = layout.height;
-    // Keep canvas drawing coordinates at logical size
-    this.canvas.width = logicalW;
-    this.canvas.height = logicalH;
-    // find container width
-    const container = this.canvas.parentElement || document.body;
-    const maxCssW = Math.max(320, Math.min(container.clientWidth, window.innerWidth));
-    const maxCssH = Math.max(200, window.innerHeight - 20);
-    const scale = Math.min(maxCssW / logicalW, maxCssH / logicalH, 1);
-    this.canvas.style.width = Math.floor(logicalW * scale) + 'px';
-    this.canvas.style.height = Math.floor(logicalH * scale) + 'px';
+    // Set the canvas drawing buffer to viewport size so we can draw
+    // letterbox areas (left/right) directly. Compute a cell size that
+    // prefers filling the height (for portrait) and center horizontally.
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // Set canvas logical size to viewport so black areas act as letterbox
+    this.canvas.width = vw;
+    this.canvas.height = vh;
+    this.canvas.style.width = '100vw';
+    this.canvas.style.height = '100vh';
+    // Compute cell size prioritizing height (left/right letterbox if possible)
+    const cellSize = this.computeCellSize(board);
+    this.lastCellSize = cellSize;
   }
 
   drawPiece(piece: import('./piece').Piece, board: import('./board').Board) {
-  const cellSize = 40; // scale factor 2
-    // Compute offsets in the same way drawBoard does
-  const boardW = board.width * cellSize;
-  const boardH = board.height * cellSize;
+    const cellSize = this.lastCellSize || this.computeCellSize(board);
+    // Compute offsets in the same way drawBoard does (top-aligned)
+    const boardW = board.width * cellSize;
     const offsetX = Math.floor((this.canvas.width - boardW) / 2);
-    // Compute image heights to reserve vertical space like drawBoard
-    let logoH = 0;
-    if (this.logoImage && this.logoImage.complete && this.logoImage.naturalWidth) {
-      const logoW = Math.min(boardW, this.logoImage.naturalWidth);
-      const scale = logoW / this.logoImage.naturalWidth;
-      logoH = Math.floor(this.logoImage.naturalHeight * scale);
-    }
-    let authorH = 0;
-    if (this.authorImage && this.authorImage.complete && this.authorImage.naturalWidth) {
-      const authorW = Math.min(boardW, this.authorImage.naturalWidth);
-      const scale = authorW / this.authorImage.naturalWidth;
-      authorH = Math.floor(this.authorImage.naturalHeight * scale);
-    }
-    const imagesHeight = (logoH > 0 ? logoH + this.imageGap : 0) + (authorH > 0 ? authorH : 0);
-    const offsetY = Math.floor((this.canvas.height - (boardH + imagesHeight)) / 2);
+    const offsetY = 0;
     // piece.shape is [x][y]
     const s = piece.shape;
     const w = s.length;

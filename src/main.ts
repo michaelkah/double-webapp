@@ -9,10 +9,12 @@ const renderer = new Renderer('gameCanvas');
 
 function renderBoard() {
   renderer.clear();
-  renderer.drawBoard(game.state.board, game.state.score);
+  renderer.drawBoard(game.state.board);
   if (game.state.currentPiece) {
     renderer.drawPiece(game.state.currentPiece, game.state.board);
   }
+  // Draw score inside the board (top-left with padding)
+  renderer.drawScoreInside(game.state.board, game.state.score);
 }
 
 // Fit canvas to viewport so the full logical layout is visible
