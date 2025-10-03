@@ -46,7 +46,21 @@ export class Game {
       timerRemaining: this.timerDuration,
       timerDuration: this.timerDuration,
     };
+  this.loadHighScoreFromStorage();
   // Do not spawn a piece here; startGame will handle it
+  }
+
+  // Load high score from localStorage if present
+  private loadHighScoreFromStorage() {
+    try {
+      const v = localStorage.getItem('double_high');
+      if (v !== null) {
+        const n = parseInt(v, 10);
+        if (!Number.isNaN(n)) this.state.highScores = [n];
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   start() {
@@ -64,6 +78,12 @@ export class Game {
     this.state.isRunning = false;
     this.state.isGameOver = true;
     this.saveHighScore();
+    try {
+      const top = this.state.highScores[0] ?? 0;
+      localStorage.setItem('double_high', String(top));
+    } catch (e) {
+      // ignore
+    }
   }
 
   addScore(points: number) {

@@ -95,24 +95,9 @@ export class Renderer {
     // no logos
   }
 
-  drawScoreInside(board: import('./board').Board, score: number) {
-    // Use last computed cell size if available, otherwise compute
-    const cellSize = this.lastCellSize || this.computeCellSize(board);
-  const boardW = board.width * cellSize;
-  const offsetX = Math.floor((this.canvas.width - boardW) / 2);
-  const offsetY = 0;
-    // Draw score in top-left of the board with padding
-    const padding = Math.max(8, Math.floor(cellSize * 0.2));
-    const tx = offsetX + padding;
-    const ty = offsetY + padding + Math.floor(cellSize * 0.6); // font ascent
-    this.ctx.save();
-    // Ensure score is visible above tiles
-    this.ctx.fillStyle = 'white';
-    // Bigger and bold as requested
-    const fontSize = Math.max(14, Math.floor(cellSize * 0.6));
-    this.ctx.font = `bold ${fontSize}px monospace`;
-    this.ctx.fillText(`SCORE: ${score}`, tx, ty);
-    this.ctx.restore();
+  drawScoreInside(_board: import('./board').Board, _score: number) {
+    // Old in-board score removed; HUD displays score now.
+    return;
   }
 
   // Draw HUD elements like timer bar and game over text. Expects full game state
@@ -122,6 +107,26 @@ export class Renderer {
     const boardW = board.width * cellSize;
     const offsetX = Math.floor((this.canvas.width - boardW) / 2);
     const offsetY = 0;
+
+    // Top-left: HI #### (high score). Top-right: current score (number only).
+  const beige = '#f5f0d7';
+  const alpha = 0.5;
+  const fontSize = Math.max(12, Math.floor(cellSize)*1.2);
+  this.ctx.save();
+  this.ctx.fillStyle = beige;
+  this.ctx.globalAlpha = alpha;
+  this.ctx.font = `bold ${fontSize}px monospace`;
+  this.ctx.textBaseline = 'top';
+  // HI label (use top high score or 0)
+  const hi = (state.highScores && state.highScores[0]) ? state.highScores[0] : 0;
+  this.ctx.textAlign = 'left';
+  // Padding: half a cell size from top/left/right
+  const pad = Math.floor(cellSize / 3);
+  this.ctx.fillText(`HI ${hi}`, offsetX + pad, pad);
+  // Current score at top-right (no prefix)
+  this.ctx.textAlign = 'right';
+  this.ctx.fillText(String(state.score ?? 0), offsetX + boardW - pad, pad);
+  this.ctx.restore();
 
     // Draw timer bar directly below the board. Height == cellSize
     if (typeof state.timerRemaining === 'number' && typeof state.timerDuration === 'number') {
