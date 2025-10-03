@@ -111,8 +111,58 @@ export class Renderer {
     // Bigger and bold as requested
     const fontSize = Math.max(14, Math.floor(cellSize * 0.6));
     this.ctx.font = `bold ${fontSize}px monospace`;
-    this.ctx.fillText(`Score: ${score}`, tx, ty);
+    this.ctx.fillText(`SCORE: ${score}`, tx, ty);
     this.ctx.restore();
+  }
+
+  // Draw HUD elements like timer bar and game over text. Expects full game state
+  drawHUD(state: any) {
+    const board: import('./board').Board = state.board;
+    const cellSize = this.lastCellSize || this.computeCellSize(board);
+    const boardW = board.width * cellSize;
+    const offsetX = Math.floor((this.canvas.width - boardW) / 2);
+    const offsetY = 0;
+
+    // Draw timer bar directly below the board. Height == cellSize
+    if (typeof state.timerRemaining === 'number' && typeof state.timerDuration === 'number') {
+      const timerH = cellSize;
+      const timerY = offsetY + board.height * cellSize; // immediately below board
+      const fullW = boardW;
+      const pct = Math.max(0, Math.min(1, state.timerRemaining / state.timerDuration));
+      const barW = Math.floor(fullW * pct);
+      const beige = '#f5f0d7';
+      if (barW > 0) {
+        this.ctx.fillStyle = beige;
+        this.ctx.fillRect(offsetX, timerY, barW, timerH);
+      }
+      this.ctx.save();
+      this.ctx.lineWidth = Math.max(1, Math.floor(cellSize * 0.06));
+      this.ctx.strokeStyle = beige;
+      this.ctx.strokeRect(offsetX + 0.5, timerY + 0.5, fullW - 1, timerH - 1);
+      this.ctx.restore();
+    }
+
+    // If game over, overlay centered text inside the board area
+    if (state.isGameOver) {
+      const cx = offsetX + Math.floor(boardW / 2);
+      const cy = offsetY + Math.floor((board.height * cellSize) / 2);
+      this.ctx.save();
+      // Darken the whole board area so the text stands out
+      this.ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      this.ctx.fillRect(offsetX, offsetY, boardW, board.height * cellSize);
+      // Draw large outlined text
+      const fontSize = Math.max(18, Math.floor(cellSize * 1.6));
+      this.ctx.font = `bold ${fontSize}px monospace`;
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      // Black stroke for contrast, then white fill
+      this.ctx.lineWidth = Math.max(2, Math.floor(cellSize * 0.08));
+      this.ctx.strokeStyle = 'black';
+      this.ctx.fillStyle = 'white';
+      this.ctx.strokeText('GAME OVER', cx, cy);
+      this.ctx.fillText('GAME OVER', cx, cy);
+      this.ctx.restore();
+    }
   }
 
   // Compute logical pixel size for the whole canvas based on board and images

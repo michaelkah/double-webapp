@@ -5,8 +5,12 @@ export type GameState = {
   score: number;
   highScores: number[];
   isRunning: boolean;
+  isGameOver?: boolean;
   board: Board;
   currentPiece: Piece | null;
+  // timer in milliseconds remaining
+  timerRemaining?: number;
+  timerDuration?: number;
 };
 
 // ...existing code...
@@ -15,6 +19,9 @@ export class Game {
   state: GameState;
   board: Board;
   currentPiece: Piece | null;
+  // Timer settings
+  private timerDuration = 10000; // 10 seconds
+  private lastTimerTick = 0; // ms
   // loop removal animation state
   private loopRemoval: {
     active: boolean;
@@ -35,6 +42,9 @@ export class Game {
       isRunning: false,
       board: this.board,
       currentPiece: this.currentPiece,
+      isGameOver: false,
+      timerRemaining: this.timerDuration,
+      timerDuration: this.timerDuration,
     };
   // Do not spawn a piece here; startGame will handle it
   }
@@ -43,11 +53,16 @@ export class Game {
     this.state.isRunning = true;
     this.state.score = 0;
     this.board.reset();
+    this.state.isGameOver = false;
+    this.state.timerRemaining = this.timerDuration;
+    this.state.timerDuration = this.timerDuration;
+    this.lastTimerTick = performance.now();
     this.spawnPiece();
   }
 
   end() {
     this.state.isRunning = false;
+    this.state.isGameOver = true;
     this.saveHighScore();
   }
 
@@ -79,6 +94,9 @@ export class Game {
   this.currentPiece.rotation = rotation;
   this.state.currentPiece = this.currentPiece;
     // Debug logging removed: new piece
+    // Reset timer when a new piece appears
+    this.state.timerRemaining = this.timerDuration;
+    this.lastTimerTick = performance.now();
   }
 
   movePiece(dx: number, dy: number) {
@@ -333,9 +351,101 @@ export class Game {
 
   // Called from the render loop with current timestamp (ms)
   update(now: number) {
+    // Update timer (only when running). Pause the timer while a loop removal
+    // animation is active so players don't lose time during animations.
+    if (this.state.isRunning && !this.state.isGameOver) {
+      if (!this.loopRemoval.active) {
+        const last = this.lastTimerTick || now;
+        const dt = now - last;
+        this.lastTimerTick = now;
+        if (typeof this.state.timerRemaining === 'number') {
+          this.state.timerRemaining = Math.max(0, this.state.timerRemaining - dt);
+          if (this.state.timerRemaining <= 0) {
+            // Time's up -> try to auto-place the current piece. If placement
+            // collides, it's game over. If no current piece exists, also game over.
+            if (this.currentPiece) {
+              // First, check for exact-match removal possibility (auto-removal):
+              // piece's non-empty tiles must match the board's tiles exactly.
+              const s = this.currentPiece.shape;
+              const w = s.length;
+              const h = s[0].length;
+              let nonEmptyCount = 0;
+              let exactMatch = true;
+              for (let x = 0; x < w; x++) {
+                for (let y = 0; y < h; y++) {
+                  const cellType = s[x][y];
+                  if (cellType) {
+                    nonEmptyCount++;
+                    const boardX = this.currentPiece.x + x;
+                    const boardY = this.currentPiece.y + y;
+                    if (
+                      boardY < 0 ||
+                      boardY >= this.board.height ||
+                      boardX < 0 ||
+                      boardX >= this.board.width
+                    ) {
+                      exactMatch = false;
+                      break;
+                    }
+                    if (this.board.grid[boardY][boardX] !== cellType) {
+                      exactMatch = false;
+                      break;
+                    }
+                  }
+                }
+                if (!exactMatch) break;
+              }
+
+              if (exactMatch && nonEmptyCount > 0) {
+                // Attempt costly removal if the player has enough score
+                const cost = 2 * nonEmptyCount;
+                if (this.state.score >= cost) {
+                  const cellsToRemove: { x: number; y: number }[] = [];
+                  for (let x = 0; x < w; x++) {
+                    for (let y = 0; y < h; y++) {
+                      if (s[x][y]) {
+                        cellsToRemove.push({ x: this.currentPiece.x + x, y: this.currentPiece.y + y });
+                      }
+                    }
+                  }
+                  this.loopRemoval.cells = cellsToRemove;
+                  this.loopRemoval.index = 0;
+                  this.loopRemoval.active = true;
+                  this.loopRemoval.lastTime = performance.now();
+                  this.loopRemoval.pointsPerTile = -2; // costly removal
+                  // Hide hovering piece
+                  this.currentPiece = null;
+                  this.state.currentPiece = null;
+                  // timer will be reset when spawnPiece runs after removal
+                } else {
+                  // Not enough score to perform the costly removal -> game over
+                  this.end();
+                }
+              } else {
+                // Not an exact-match removal; fall back to normal auto-place
+                if (this.checkPlacementCollision(this.currentPiece)) {
+                  this.end();
+                } else {
+                  this.placePiece();
+                  this.state.timerRemaining = this.timerDuration;
+                  this.lastTimerTick = now;
+                }
+              }
+            } else {
+              this.end();
+            }
+          }
+        }
+      } else {
+        // While removal animation runs, do not advance lastTimerTick so the
+        // timer resumes correctly after the animation finishes.
+      }
+    }
+
+    // Process loop removal animation if active
     if (!this.loopRemoval.active) return;
     const lr = this.loopRemoval;
-      if (now - lr.lastTime >= lr.interval) {
+    if (now - lr.lastTime >= lr.interval) {
       // remove next cell
       const c = lr.cells[lr.index];
       if (c && c.y >= 0 && c.y < this.board.height && c.x >= 0 && c.x < this.board.width) {
@@ -348,9 +458,9 @@ export class Game {
       lr.lastTime = now;
       // If finished
       if (lr.index >= lr.cells.length) {
-  lr.active = false;
-  // reset pointsPerTile back to default for future removals
-  lr.pointsPerTile = 1;
+        lr.active = false;
+        // reset pointsPerTile back to default for future removals
+        lr.pointsPerTile = 1;
         // If the board is completely empty after removal, double the score
         let boardEmpty = true;
         for (let yy = 0; yy < this.board.height && boardEmpty; yy++) {

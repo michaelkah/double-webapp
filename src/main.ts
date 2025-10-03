@@ -15,6 +15,8 @@ function renderBoard() {
   }
   // Draw score inside the board (top-left with padding)
   renderer.drawScoreInside(game.state.board, game.state.score);
+  // Draw HUD (timer, game over)
+  renderer.drawHUD(game.state);
 }
 
 // Fit canvas to viewport so the full logical layout is visible
@@ -25,6 +27,11 @@ function gameLoop() {
   // update game animation state (pass timestamp)
   game.update(performance.now());
   if (game.state.isRunning) {
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Keep rendering while game is running or when game-over overlay should be visible
+  if (game.state.isGameOver && !game.state.isRunning) {
     requestAnimationFrame(gameLoop);
   }
 }
@@ -51,6 +58,11 @@ new MobileControls('gameCanvas', (direction) => {
 
 // Keyboard controls for desktop
 window.addEventListener('keydown', (e) => {
+  // If game over, allow Space/Enter to restart
+  if (game.state.isGameOver && (e.key === ' ' || e.key.toLowerCase() === 'enter')) {
+    startGame();
+    return;
+  }
   if (!game.state.currentPiece || !game.state.isRunning) return;
   let moved = false;
   switch (e.key.toLowerCase()) {
