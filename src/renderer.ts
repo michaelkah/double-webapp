@@ -287,6 +287,58 @@ export class Renderer {
       this.ctx.restore();
     }
 
+    // Render HUD popups if present (global and tile-attached)
+    if (state.popups && Array.isArray(state.popups) && state.popups.length > 0) {
+      const now2 = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+      // Draw tile popups first (they are positioned over the board tiles)
+      for (const p of state.popups.slice()) {
+        const elapsed = now2 - p.start;
+        if (elapsed >= p.duration) continue;
+        if (p.kind === 'tile' && typeof p.boardX === 'number' && typeof p.boardY === 'number') {
+          const cellSize = this.lastCellSize || Math.max(8, Math.floor(this.canvas.height / state.board.height));
+          const boardW2 = state.board.width * cellSize;
+          const boardH2 = state.board.height * cellSize;
+          const ox = Math.floor((this.canvas.width - boardW2) / 2);
+          const oy = Math.floor((this.canvas.height - boardH2) / 2);
+          const px = ox + p.boardX * cellSize + Math.floor(cellSize / 2);
+          const pyBase = oy + p.boardY * cellSize + Math.floor(cellSize / 2);
+          // Float upward: move up by upDist * t where upDist ~ 1.2 * cellSize
+          const upDist = Math.floor(cellSize * 1.2);
+          const dy = -Math.floor(upDist * (elapsed / p.duration));
+          this.ctx.save();
+          // soft fade: alpha decreases over time
+          this.ctx.globalAlpha = Math.max(0, 1 - (elapsed / p.duration));
+          this.ctx.fillStyle = '#ffffff';
+          this.ctx.font = `bold ${Math.max(10, Math.floor(cellSize * 0.6))}px monospace`;
+          this.ctx.textAlign = 'center';
+          this.ctx.textBaseline = 'middle';
+          this.ctx.fillText(p.text, px, pyBase + dy - Math.floor(cellSize * 0.2));
+          this.ctx.restore();
+        }
+      }
+      // Draw global popups stacked below the HI/score (right side)
+      const pad = Math.floor(this.lastCellSize / 2);
+      let stackY = Math.floor(this.lastCellSize / 2) + pad;
+      for (const p of state.popups.slice()) {
+        const elapsed = now2 - p.start;
+        if (elapsed >= p.duration) continue;
+        if (p.kind !== 'global') continue;
+        const t = Math.max(0, Math.min(1, elapsed / p.duration));
+        const alphaP = 1 - t;
+        this.ctx.save();
+        this.ctx.globalAlpha = alphaP;
+        this.ctx.fillStyle = p.text && p.text.startsWith('+') ? '#cfe8c6' : '#f2b3b3';
+        this.ctx.font = `bold ${Math.max(12, Math.floor(this.lastCellSize * 0.6))}px monospace`;
+        this.ctx.textAlign = 'right';
+        this.ctx.textBaseline = 'top';
+        this.ctx.fillText(p.text, offsetX + boardW - pad, offsetY + stackY);
+        this.ctx.restore();
+        stackY += Math.floor(this.lastCellSize * 0.9);
+      }
+      // Remove expired popups in-place (mutable) to keep state small
+      state.popups = state.popups.filter((p: any) => (now2 - p.start) < p.duration);
+    }
+
     // Draw double.gif flash if requested (draw after overlays so it appears on top)
     if (state.doubleFlashStart && doubleOpacity > 0) {
       const img = this.doubleImg;

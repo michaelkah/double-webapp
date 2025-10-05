@@ -1,4 +1,5 @@
 import { Board, CELL_EMPTY } from './board';
+import { storageGet, storageSet } from './storage';
 import { Piece, PIECE_SHAPES } from './piece';
 
 export type GameState = {
@@ -18,6 +19,8 @@ export type GameState = {
   doubleFlashStart?: number; // performance.now() ms when flash started
   doubleFlashDuration?: number; // total duration in ms
   doubleFlashCount?: number; // number of flashes to perform
+  // HUD popups for transient score animations
+  popups?: { text: string; boardX?: number; boardY?: number; start: number; duration: number; kind?: 'tile' | 'global'; color?: string }[];
 };
 
 // ...existing code...
@@ -38,6 +41,7 @@ export class Game {
     interval: number; // ms per tile
     pointsPerTile?: number;
     exactMatch?: boolean;
+    anchor?: { x: number; y: number };
   };
   private restartTimeoutId: number | null = null;
   
@@ -58,7 +62,119 @@ export class Game {
       canRestart: true,
     };
   this.loadHighScoreFromStorage();
+  // Attempt to load saved game state from localStorage
+  this.restored = false;
+  try {
+    if (this.loadState()) {
+      this.restored = true;
+    }
+  } catch (e) {
+    // ignore load errors
+  }
+  // Ensure we persist on unload
+  try {
+    window.addEventListener('beforeunload', () => this.saveState());
+  } catch (e) {}
   // Do not spawn a piece here; startGame will handle it
+  }
+
+  // Flag set when a saved state was successfully restored
+  restored: boolean = false;
+
+  // Save the current full game state into localStorage
+  saveState() {
+    try {
+      const key = 'double_save_v1';
+      const payload: any = { version: 1 };
+      payload.board = { width: this.board.width, height: this.board.height, grid: this.board.grid };
+      payload.state = {
+        score: this.state.score,
+        highScores: this.state.highScores,
+        isRunning: this.state.isRunning,
+        isGameOver: this.state.isGameOver,
+        paused: this.state.paused,
+        timerRemaining: this.state.timerRemaining,
+        timerDuration: this.state.timerDuration,
+        popups: this.state.popups,
+      };
+      // currentPiece: store shape index, rotation, x, y
+      if (this.currentPiece) {
+        const shapeIndex = PIECE_SHAPES.findIndex((s) => s === this.currentPiece!.shapes);
+        payload.currentPiece = { shapeIndex, rotation: this.currentPiece.rotation, x: this.currentPiece.x, y: this.currentPiece.y };
+      } else {
+        payload.currentPiece = null;
+      }
+      // loopRemoval state
+      payload.loopRemoval = {
+        active: this.loopRemoval.active,
+        cells: this.loopRemoval.cells,
+        index: this.loopRemoval.index,
+        interval: this.loopRemoval.interval,
+        pointsPerTile: this.loopRemoval.pointsPerTile,
+        exactMatch: this.loopRemoval.exactMatch,
+        anchor: this.loopRemoval.anchor,
+      };
+  storageSet(key, JSON.stringify(payload));
+    } catch (e) {
+      // ignore storage errors
+    }
+  }
+
+  // Load saved state from localStorage. Returns true if a valid save was loaded.
+  loadState(): boolean {
+    try {
+      const key = 'double_save_v1';
+  const raw = storageGet(key);
+      if (!raw) return false;
+      const payload = JSON.parse(raw);
+      if (!payload || payload.version !== 1) return false;
+      // restore board
+      if (payload.board && Array.isArray(payload.board.grid)) {
+        this.board.width = payload.board.width || this.board.width;
+        this.board.height = payload.board.height || this.board.height;
+        this.board.grid = payload.board.grid;
+      }
+      // restore state fields
+      const s = payload.state || {};
+      this.state.score = s.score || 0;
+      this.state.highScores = s.highScores || this.state.highScores;
+      this.state.isRunning = !!s.isRunning;
+      this.state.isGameOver = !!s.isGameOver;
+      this.state.paused = !!s.paused;
+      this.state.timerRemaining = typeof s.timerRemaining === 'number' ? s.timerRemaining : this.timerDuration;
+      this.state.timerDuration = typeof s.timerDuration === 'number' ? s.timerDuration : this.timerDuration;
+      this.state.popups = s.popups || [];
+      // restore currentPiece
+      if (payload.currentPiece) {
+        const cp = payload.currentPiece;
+        const si = cp.shapeIndex >= 0 && cp.shapeIndex < PIECE_SHAPES.length ? cp.shapeIndex : 0;
+        const shape = PIECE_SHAPES[si];
+        this.currentPiece = new Piece(shape, cp.x || 0, cp.y || 0);
+        this.currentPiece.rotation = cp.rotation || 0;
+        this.state.currentPiece = this.currentPiece;
+      } else {
+        this.currentPiece = null;
+        this.state.currentPiece = null;
+      }
+      // restore loopRemoval
+      if (payload.loopRemoval) {
+        const lr = payload.loopRemoval;
+        this.loopRemoval.active = !!lr.active;
+        this.loopRemoval.cells = lr.cells || [];
+        this.loopRemoval.index = lr.index || 0;
+        this.loopRemoval.interval = lr.interval || this.loopRemoval.interval;
+        this.loopRemoval.pointsPerTile = lr.pointsPerTile;
+        this.loopRemoval.exactMatch = !!lr.exactMatch;
+        this.loopRemoval.anchor = lr.anchor;
+        // reset lastTime so animation resumes from now
+        this.loopRemoval.lastTime = performance.now();
+      }
+      // reset last timer tick and continue
+      this.lastTimerTick = performance.now();
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   // Small vibration helper (wrap navigator.vibrate safely)
@@ -75,7 +191,7 @@ export class Game {
   // Load high score from localStorage if present
   private loadHighScoreFromStorage() {
     try {
-      const v = localStorage.getItem('double_high');
+  const v = storageGet('double_high');
       if (v !== null) {
         const n = parseInt(v, 10);
         if (!Number.isNaN(n)) this.state.highScores = [n];
@@ -96,12 +212,14 @@ export class Game {
     this.state.timerDuration = this.timerDuration;
     this.lastTimerTick = performance.now();
     this.spawnPiece();
+    this.saveState();
   }
 
   pause() {
     if (this.state.isRunning && !this.state.paused) {
       this.state.paused = true;
       this.state.isRunning = false;
+      this.saveState();
     }
   }
 
@@ -111,6 +229,7 @@ export class Game {
       this.state.isRunning = true;
       // reset timer tick so timer doesn't jump
       this.lastTimerTick = performance.now();
+      this.saveState();
     }
   }
 
@@ -127,17 +246,29 @@ export class Game {
       this.restartTimeoutId = null;
     }, 2000);
     this.saveHighScore();
-    try {
-      const top = this.state.highScores[0] ?? 0;
-      localStorage.setItem('double_high', String(top));
-    } catch (e) {
-      // ignore
+      try {
+        const top = this.state.highScores[0] ?? 0;
+        storageSet('double_high', String(top));
+      } catch (e) {
+        // ignore
+      }
+  }
+
+  addScore(points: number, opts?: { boardX?: number; boardY?: number; global?: boolean }) {
+    this.state.score += points;
+    if (!this.state.popups) this.state.popups = [];
+    const sign = points >= 0 ? '+' : '';
+    const txt = `${sign}${points}`;
+    if (opts && typeof opts.boardX === 'number' && typeof opts.boardY === 'number') {
+      // Tile-attached popup
+      this.state.popups.push({ text: txt, boardX: opts.boardX, boardY: opts.boardY, start: performance.now(), duration: 900, kind: 'tile' });
+    } else {
+      // Global popup
+      this.state.popups.push({ text: txt, start: performance.now(), duration: 1000, kind: 'global' });
     }
   }
 
-  addScore(points: number) {
-    this.state.score += points;
-  }
+  // ...popup support implemented via addScore(opts) for tile/global popups
 
   saveHighScore() {
     this.state.highScores.push(this.state.score);
@@ -166,6 +297,8 @@ export class Game {
     // Reset timer when a new piece appears
     this.state.timerRemaining = this.timerDuration;
     this.lastTimerTick = performance.now();
+    // Persist new piece + timer
+    this.saveState();
   }
 
   movePiece(dx: number, dy: number) {
@@ -351,12 +484,16 @@ export class Game {
       this.loopRemoval.lastTime = performance.now();
       // Mark this removal as an exact-match removal so scoring logic
       // knows to apply a single halving at the end.
+  // Anchor popup location near the piece center
+  this.loopRemoval.anchor = { x: this.currentPiece.x, y: this.currentPiece.y };
       this.loopRemoval.exactMatch = true;
       // Hide hovering piece
       this.currentPiece = null;
       this.state.currentPiece = null;
       // Haptic feedback for removal action
       this.vibrate([20, 10, 20]);
+  // Persist the scheduled removal and cleared hovering piece
+  this.saveState();
       return;
     }
     // For normal placement (not exact-match removal), ensure there's no collision
@@ -445,7 +582,11 @@ export class Game {
               // exact-match removals and normal auto-placement. The deduction
               // happens before placement/removal logic so subsequent halving
               // (for exact-match) applies to the reduced score.
-              this.state.score = Math.max(0, (this.state.score || 0) - 10);
+              const beforeAuto = this.state.score || 0;
+              this.state.score = Math.max(0, beforeAuto - 10);
+              if (!this.state.popups) this.state.popups = [];
+              // Attach auto-drop popup next to the current piece
+              this.state.popups.push({ text: '-10', boardX: this.currentPiece.x, boardY: this.currentPiece.y, start: performance.now(), duration: 1000, kind: 'tile' });
 
               // First, check for exact-match removal possibility (auto-removal):
               // piece's non-empty tiles must match the board's tiles exactly.
@@ -495,10 +636,14 @@ export class Game {
                 this.loopRemoval.index = 0;
                 this.loopRemoval.active = true;
                 this.loopRemoval.lastTime = performance.now();
+                // Anchor popup location near the piece center
+                this.loopRemoval.anchor = { x: this.currentPiece.x, y: this.currentPiece.y };
                 this.loopRemoval.exactMatch = true;
                 // Hide hovering piece
                 this.currentPiece = null;
                 this.state.currentPiece = null;
+                // Persist scheduled removal
+                this.saveState();
                 // timer will be reset when spawnPiece runs after removal
               } else {
                 // Not an exact-match removal; fall back to normal auto-place
@@ -537,10 +682,11 @@ export class Game {
           const ppt = lr.pointsPerTile ?? 1;
           if (ppt > 0) {
             // progressive scoring: (index+1) * ppt
-            this.addScore((lr.index + 1) * ppt);
+            const pts = (lr.index + 1) * ppt;
+            this.addScore(pts, { boardX: c.x, boardY: c.y });
           } else {
             // costly removal: constant negative per tile
-            this.addScore(ppt);
+            this.addScore(ppt, { boardX: c.x, boardY: c.y });
           }
         }
       }
@@ -555,8 +701,19 @@ export class Game {
         // of the current score (rounded up). This operation must happen
         // once per removal operation, not per tile.
         if (lr.exactMatch) {
-          // allow removal even when score is 0; ceil(score/2) handles 0 -> 0
-          this.state.score = Math.ceil(this.state.score / 2);
+          // allow removal even when score is 0; apply halving and display
+          // a global popup showing the amount removed (oldScore - newScore)
+          const oldScore = this.state.score || 0;
+          const newScore = Math.ceil(oldScore / 2);
+          const removed = oldScore - newScore;
+          this.state.score = newScore;
+          if (!this.state.popups) this.state.popups = [];
+          // place the halving popup near the removal anchor if available
+          const ax = lr.anchor?.x ?? Math.floor(this.board.width / 2);
+          const ay = lr.anchor?.y ?? Math.floor(this.board.height / 2);
+          this.state.popups.push({ text: `-${removed}`, boardX: ax, boardY: ay, start: performance.now(), duration: 1200, kind: 'tile' });
+          // Haptic feedback for halving (distinct longer vibration)
+          this.vibrate([80]);
           // clear the flag for future removals
           lr.exactMatch = false;
         }
@@ -571,7 +728,15 @@ export class Game {
           }
         }
         if (boardEmpty) {
-          this.state.score = this.state.score * 2;
+          const old = this.state.score || 0;
+          this.state.score = old * 2;
+          if (!this.state.popups) this.state.popups = [];
+          // place the doubling popup near the removal anchor if available
+          const ax2 = lr.anchor?.x ?? Math.floor(this.board.width / 2);
+          const ay2 = lr.anchor?.y ?? Math.floor(this.board.height / 2);
+          this.state.popups.push({ text: `+${old}`, boardX: ax2, boardY: ay2, start: performance.now(), duration: 1400, kind: 'tile' });
+          // Haptic feedback for doubling (short pulse pattern)
+          this.vibrate([30, 10, 30]);
           // Trigger double-flash animation: show double.gif centered on the
           // board at 90% width and flash the score. Flash 3 times within 2s.
           this.state.doubleFlashStart = performance.now();

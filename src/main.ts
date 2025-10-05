@@ -14,7 +14,24 @@ async function init() {
   } catch (e) {
     // ignore preload errors; renderer falls back to colored cells
   }
-  startGame();
+  try {
+    // If we restored a saved game, do not call startGame() because that
+    // would reset the board and score. Instead resume rendering and let
+    // the restored `game.state` drive the UI.
+    if (game.restored) {
+      // Fit canvas to the restored board and start the render loop which
+      // will continue the game's previous running/paused state.
+      renderer.fitToViewport(game.state.board);
+      gameLoop();
+    } else {
+      startGame();
+    }
+  } catch (e: any) {
+    // Log startup error to console
+    const txt = e && e.stack ? e.stack : String(e);
+    console.error('Failed to start game', txt);
+    throw e;
+  }
 }
 
 function renderBoard() {
@@ -47,9 +64,16 @@ window.addEventListener('focus', () => {
 });
 
 function gameLoop() {
-  renderBoard();
-  // update game animation state (pass timestamp)
-  game.update(performance.now());
+  try {
+    renderBoard();
+    // update game animation state (pass timestamp)
+    game.update(performance.now());
+  } catch (err: any) {
+    // Log runtime errors and stop the loop
+    const stack = err && err.stack ? err.stack : String(err);
+    console.error('Runtime error in game loop', stack);
+    return;
+  }
   if (game.state.isRunning) {
     requestAnimationFrame(gameLoop);
   }
