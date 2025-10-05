@@ -182,10 +182,11 @@ export class Renderer {
     this.ctx.globalAlpha = alpha;
     this.ctx.font = `bold ${fontSize}px monospace`;
     this.ctx.textBaseline = 'top';
-    const hi = (state.highScores && state.highScores[0]) ? state.highScores[0] : 0;
-    this.ctx.textAlign = 'left';
-    const pad = Math.floor(cellSize / 2);
-    this.ctx.fillText(`HI ${hi}`, offsetX + pad, offsetY + pad);
+  const hi = (state.highScores && state.highScores[0]) ? state.highScores[0] : 0;
+  this.ctx.textAlign = 'left';
+  const pad = Math.floor(cellSize / 2);
+  // Use lowercase 'hi' prefix without a trailing space as requested
+  this.ctx.fillText(`hi${hi}`, offsetX + pad, offsetY + pad);
     this.ctx.textAlign = 'right';
     // If double flash is active, show/hide the score (hard flash). Otherwise draw normally.
     if (state.doubleFlashStart && doubleOpacity > 0) {
